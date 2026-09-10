@@ -63,6 +63,9 @@ class Condition(Enum):
     The condition is what a caller selects on, and the message beside it is for a person to
     read. `scripts/image.sh --check` drops `CREDENTIAL`, so rewording a message changes
     nothing any caller matches.
+
+    There is no condition for the environment route. Its variables are forwarded by name and
+    never read here, so the host holds nothing this can check. docs/docker.md.
     """
 
     DAEMON = "daemon"
@@ -182,11 +185,23 @@ class Docker:
         self.platform = settings.platform
         self.claude_code_version = settings.claude_code_version
         self.login_dir = settings.login_dir
+        self.auth_env = settings.auth_env
         self.extra_ca_file: Path | None = (
             settings.extra_ca_file
             if settings.extra_ca_file is not None and settings.extra_ca_file.is_file()
             else None
         )
+
+    @property
+    def uses_env_auth(self) -> bool:
+        """Which credential route this configuration selects.
+
+        The one place the rule is derived: the route is the environment when
+        `docker.auth_env` names a variable, and the login when it names none. The three
+        callers that differ, `run_preamble`, `check` and `cli._setup`, read it here.
+        docs/docker.md.
+        """
+        return bool(self.auth_env)
 
     # The login this package owns. Both paths are mounted read-write, because the CLI
     # refreshes its token and rewrites its state file on every start.
@@ -272,6 +287,10 @@ class Docker:
         `auth login` rather than bare `claude`, which lands in the first-run configuration
         wizard on a fresh configuration directory. This container exists to produce a
         credentials file, and nothing here picks a theme.
+
+        It is the login route's own list and reads `docker.auth_env` not at all, so a
+        developer who configured the environment route can still log in on purpose. What
+        skips the step is `cli._setup`, not this. docs/docker.md.
         """
         return [
             "docker",
@@ -297,9 +316,12 @@ class Docker:
         """One run's container, up to the mounts, the tag and the command.
 
         The one place the run's platform, uid, home, enablement variable, sandbox options
-        and credential mounts are written. `run_argv` adds the two mounts and the harness;
+        and credential route are written. `run_argv` adds the two mounts and the harness;
         tests/integration/test_docker.py adds its own mounts and a fixed command, so what
         that tier proves about the sandbox it proves about this list.
+
+        The credential route is one of two and never both: the login mounts, or the named
+        variables. docs/docker.md.
         """
         return [
             "docker",
@@ -323,7 +345,7 @@ class Docker:
             "--security-opt",
             "systempaths=unconfined",
             *self.extra_ca_env_argv(),
-            *self.credential_argv(),
+            *(self.auth_env_argv() if self.uses_env_auth else self.credential_argv()),
         ]
 
     def run_argv(
@@ -362,6 +384,24 @@ class Docker:
             "-v",
             f"{self.state_file}:{CONTAINER_HOME}/{STATE_FILE_NAME}:rw",
         ]
+
+    def auth_env_argv(self) -> list[str]:
+        """The other credential route: each named variable, forwarded by name.
+
+        `--env NAME` with no `=` tells Docker to take the value from this process's own
+        environment, so no credential enters an argument list, a log, a dry run or
+        `docker inspect`. That is also what keeps the one-configuration-file rule intact:
+        this package reads no setting and no value from the environment, and the file names
+        which variable the child is to receive. docs/library.md.
+
+        A name that is unset in this process forwards nothing, and the CLI in the container
+        then refuses with its own provider error. Nothing here checks presence, because
+        checking it would mean reading the environment. docs/docker.md.
+        """
+        argv = []
+        for name in self.auth_env:
+            argv += ["--env", name]
+        return argv
 
     def extra_ca_env_argv(self) -> list[str]:
         """Node carries its own root store and does not read the system one.
@@ -473,6 +513,9 @@ class Docker:
         """The unmet conditions, in order, each with the command that fixes it.
 
         An empty list means ready. It writes nothing and builds nothing.
+
+        `CREDENTIAL` is not reported on the environment route: there is no login in that
+        path, and a login this run will not mount is not a condition of it. docs/docker.md.
         """
         unmet: list[tuple[Condition, str]] = []
         if not self.daemon_is_reachable():
@@ -488,6 +531,6 @@ class Docker:
             unmet.append(
                 (Condition.IMAGE, f"image {self.tag} is absent: {remedy(Condition.IMAGE)}")
             )
-        if not self.has_credential():
+        if not self.uses_env_auth and not self.has_credential():
             unmet.append((Condition.CREDENTIAL, f"no credential: {remedy(Condition.CREDENTIAL)}"))
         return unmet

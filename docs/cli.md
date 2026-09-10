@@ -143,6 +143,7 @@ a run that silently spends ten more building an image is not readable in a log.
 | Backend    | Requires                                                             | Fails when                                                  |
 | ---------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
 | `--docker` | a Docker or Rancher daemon, the image at the current digest, and the container login | the daemon is down, the image is absent or stale, or there is no login |
+| `--docker`, with `docker.auth_env` set | the daemon and the image, and no login | the daemon is down, or the image is absent or stale |
 | `--cowork` | macOS, `claude` on `PATH`, a `cowork_evals.yaml` naming a profile, a readable sessions root under it, an Accessibility grant, and the suite inside the driver's `max_runs` | the grant is missing, so there is no headless route and no CI, or `claude` is absent, or no profile is configured, or the suite would exceed the ceiling |
 | `test`     | a Docker or Rancher daemon, the eval image, and the test image over it        | the daemon is down, or either image is absent or stale |
 
@@ -164,6 +165,11 @@ image cowork-evals:<digest> is absent: run cowork_evals setup --docker
 exists for unattended use. A missing container login still fails the preflight, because that
 login is interactive. On `test` it builds the test image, and the eval image first when that
 is absent too.
+
+`docker.auth_env` is what makes the container backend unattended end to end: it names the
+variables that carry a provider credential into the container, and the login is then neither
+required nor mounted. Which route a configuration selects, and what each carries, is
+[docker.md](docker.md).
 
 `run` also refuses three things a backend cannot report. Each happens before anything is
 created and before anything is deleted, so exit 2 and exit 3 leave the log root untouched.
@@ -261,6 +267,10 @@ is no long-lived container to create. When no container login exists, it then st
 interactive container to log in. That step needs a terminal and a browser. See
 [docker.md](docker.md) and [cowork_test.md](cowork_test.md).
 
+With `docker.auth_env` set it builds the two images, states the route it took and makes no
+login. The images are the whole of what it builds there, so it needs no terminal and no
+browser.
+
 There is no `setup --cowork`. The desktop application and the Accessibility grant are
 installed and granted by hand, and `check --cowork` reports what is missing.
 
@@ -273,7 +283,9 @@ builds. It exits 0 when every named backend is ready and 3 otherwise, listing ea
 condition and its fix. The backend is required, so `check` with none is a usage error.
 
 `check --docker` reports both images and the container login. The login is unmet for `run` and
-is not read by `test`'s preflight, and `check` reports the condition either way.
+is not read by `test`'s preflight, and `check` reports the condition either way. With
+`docker.auth_env` set there is no login on that route, so the condition is not reported at
+all and a machine that never logged in reports `ready`.
 
 `check --all` covers `--docker` and `--cowork`, so it reports the Accessibility grant on a
 machine that has no CoWork installed rather than failing the whole invocation. It returns 0 on

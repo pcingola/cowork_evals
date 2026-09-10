@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from cowork_evals.config import Config, DockerSection
 from cowork_evals.docker import Condition, Docker, probe, remedy
 from cowork_evals.docker.parity import EXPECTED_VERSIONS, REQUIREMENTS, compare
 from cowork_evals.harness import RunOptions
@@ -187,6 +188,28 @@ def test_the_plugin_mount_refuses_a_write_and_the_log_mount_accepts_one(docker, 
     reference.touch()
     assert written.stat().st_uid == reference.stat().st_uid == os.getuid()
     assert written.stat().st_gid == reference.stat().st_gid
+
+
+def test_the_environment_route_reports_no_credential_condition(docker, tmp_path):
+    """A machine that never logged in is ready on that route. docs/docker.md.
+
+    The daemon and the image are the real ones, and `login_dir` names a directory holding no
+    login, so `has_credential` is false and `check` still returns nothing unmet. `auth_env` is
+    not a build input, so the tag is the one the session fixture already asserted is present.
+    """
+    configured = Docker(
+        Config(
+            docker=DockerSection(
+                platform=docker.platform,
+                claude_code_version=docker.claude_code_version,
+                login_dir=tmp_path / "no-login",
+                auth_env=("CLAUDE_CODE_USE_BEDROCK", "AWS_REGION"),
+            )
+        )
+    )
+    assert configured.tag == docker.tag
+    assert configured.has_credential() is False
+    assert [condition for condition, _ in configured.check()] == []
 
 
 def test_the_harness_is_enabled_for_this_credential(credentialled, tmp_path):

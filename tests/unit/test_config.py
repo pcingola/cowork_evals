@@ -60,6 +60,17 @@ def test_missing_file_yields_the_docker_defaults(working_directory, tmp_path: Pa
     assert section.claude_code_version == "2.1.265"
     assert section.login_dir == Path.home() / ".cache" / "cowork_evals" / "claude"
     assert section.extra_ca_file is None
+    assert section.auth_env == ()
+
+
+def test_auth_env_is_read_as_a_tuple_of_names(tmp_path: Path) -> None:
+    file = write(tmp_path, "docker:\n  auth_env: [CLAUDE_CODE_USE_BEDROCK, AWS_REGION]\n")
+    assert Config.load(file).docker.auth_env == ("CLAUDE_CODE_USE_BEDROCK", "AWS_REGION")
+
+
+def test_an_empty_auth_env_list_is_the_login_route(tmp_path: Path) -> None:
+    file = write(tmp_path, "docker:\n  auth_env: []\n")
+    assert Config.load(file).docker.auth_env == ()
 
 
 # The file over the defaults.
@@ -139,6 +150,7 @@ def test_an_unknown_key_inside_a_known_section_raises(tmp_path: Path, body: str,
         ("eval:\n  max_cost_usd: five\n", "eval.max_cost_usd"),
         ("eval:\n  allow_tools: Bash Write\n", "eval.allow_tools"),
         ("docker:\n  platform: 3\n", "docker.platform"),
+        ("docker:\n  auth_env: AWS_REGION\n", "docker.auth_env"),
     ],
 )
 def test_a_wrongly_typed_value_raises(tmp_path: Path, body: str, key: str) -> None:

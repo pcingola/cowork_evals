@@ -37,6 +37,11 @@ docker:
   # platform: linux/arm64
   # claude_code_version: 2.1.265
   # login_dir: ~/.cache/cowork_evals/claude
+  # The credential route. Empty is the login `setup --docker` makes, kept in login_dir.
+  # Naming variables here is the other route: each is forwarded into the container by name,
+  # the login is neither required nor mounted, and `setup --docker` makes none. Only the
+  # names go here. A value never does, and this package never reads one.
+  # auth_env: [CLAUDE_CODE_USE_BEDROCK, AWS_BEARER_TOKEN_BEDROCK, ANTHROPIC_BEDROCK_BASE_URL, AWS_REGION]
   # An extra root CA, for a host whose network inspects TLS. Unset, or naming a file that
   # is not there, passes nothing. The certificate never enters this repository.
   # extra_ca_file: ~/extra_root_ca.pem

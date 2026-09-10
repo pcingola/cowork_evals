@@ -10,8 +10,9 @@ stack, not only the Python interpreter and its wheels.
   components come from upstream instead, each with one source.
 - **One image, one tag.** `cowork-evals:<digest>`, where the digest covers every build input.
   There is no `latest`.
-- **One credential route**: a login this package owns, mounted read-write. Never the
-  developer's own `~/.claude`, and never an API key.
+- **Two credential routes, and one rule picks which.** `docker.auth_env` names variables and
+  the route is those variables; it names none and the route is a login this package owns,
+  mounted read-write. Never the developer's own `~/.claude`.
 - **Read-only everywhere except the log directory** and the two credential paths.
 - **Granting `Bash` turns on the OS sandbox**, so the container needs bubblewrap and two
   `--security-opt` values.
@@ -28,7 +29,8 @@ What of this is built is the status table in [running_evals.md](running_evals.md
 `cowork_evals setup --docker` builds the image and `cowork_evals run --docker` runs through
 it. `scripts/image.sh` and `scripts/login.sh` stay as development tasks for this repository.
 A failed check names the command a consumer runs, which is `cowork_evals setup --docker` for
-both an absent image and an absent login, and never a script under `scripts/`.
+both an absent image and an absent login, and never a script under `scripts/`. On the
+environment route there is no login, so that condition is not reported at all.
 
 ## Configuration
 
@@ -41,6 +43,7 @@ The `docker:` section of `cowork_evals.yaml`. The file, and the ladder over it, 
 | `claude_code_version`  | `2.1.265`                      | The npm version of the CLI installed. In the digest  |
 | `login_dir`            | `~/.cache/cowork_evals/claude` | Where the login this package owns is kept            |
 | `extra_ca_file`        | none                           | An extra root CA for a host whose network inspects TLS |
+| `auth_env`             | empty                          | The variable names the environment credential route forwards |
 
 ## Usage
 
@@ -262,8 +265,25 @@ image. The one consequence for a consumer: a skill that shells out to `bubblewra
 
 ## Credentials
 
-One route: a login this package owns, mounted. There is no API key route, by the
-developer's decision of 2026-09-08. A host with no interactive terminal logs in on a host
+Two routes, and `docker.auth_env` is the rule that picks one:
+
+| `docker.auth_env` | The route is                                | `setup --docker` | `check --docker` reports a credential |
+| ----------------- | ------------------------------------------- | ---------------- | ------------------------------------- |
+| empty, the default | the login below, mounted                   | makes it         | yes                                   |
+| naming a variable | those variables, forwarded into the container | makes none      | no                                    |
+
+Never both. A run carries the login mounts or the named variables, and the two lists are
+built in one place, `Docker.run_preamble`. `Docker.uses_env_auth` derives the rule, and the
+three callers that differ read it there.
+
+The login was the only route until 2026-09-10. The decision of 2026-09-08 that there is no
+API key route stands for what it decided: nothing here writes a key, reads a key, or takes
+one as a setting. The environment route names variables and forwards them, which is a
+different thing and is how a run reaches Bedrock, Vertex, Foundry or a gateway.
+
+### The login route
+
+A login this package owns, mounted. A host with no interactive terminal logs in on a host
 that has one and carries the two paths below.
 
 The login happens once, in an interactive container that `setup --docker` starts when the
@@ -309,11 +329,50 @@ seeds no state file beside it.
   See [running_evals.md](running_evals.md).
 
 No login is a failed preflight, so it exits 3 and names the command that fixes it. See
-[cli.md](cli.md).
+[cli.md](cli.md). On the environment route it is not a condition, so it exits 0.
 
 `CLAUDE_CODE_WALNUT_SPIRE` is passed in with `--env`, because the process inside the
 container is `claude plugin eval` itself with no wrapper in the way. A shell opened in the
 container by hand must export it. See [plugin_eval.md](plugin_eval.md).
+
+### The environment route
+
+`docker.auth_env` names variables. Each is emitted as `--env <NAME>`, with no `=` and no
+value, so Docker takes the value from the `cowork_evals` process's own environment and the
+credential reaches the child without entering an argument list, a `--dry-run` listing,
+`run.log` or `docker inspect`.
+
+```yaml
+docker:
+  auth_env: [CLAUDE_CODE_USE_BEDROCK, AWS_BEARER_TOKEN_BEDROCK, ANTHROPIC_BEDROCK_BASE_URL, AWS_REGION]
+```
+
+Those four are one operator's Bedrock set and are not a list this package knows. Which
+variables a provider needs is the CLI's, and the harness reference states which of them reach
+a run: the provider selectors, `AWS_*`, gcloud configuration, `ANTHROPIC_API_KEY`,
+`ANTHROPIC_BASE_URL` and the proxy variables all pass through. See
+[claude_code/plugin_eval_reference.md](claude_code/plugin_eval_reference.md).
+
+Only names go in the file. A value never does, and the public repository rule in `README.md`
+covers this key like any other.
+
+| Property                                             | Why                                                                 |
+| ---------------------------------------------------- | -------------------------------------------------------------------- |
+| The value is never read on the host                   | Nothing in this package reads the process environment, and this key does not change that. The file names a variable; Docker moves it. See [library.md](library.md) |
+| An unset name forwards nothing                       | `--env NAME` on a name this process does not hold passes nothing, and the CLI in the container then refuses with its own provider error |
+| Presence is not a preflight condition                | Checking it would mean reading the environment. A typo therefore costs a container start, not a wrong pass |
+| The login is neither required nor mounted            | `check --docker` does not report it and `setup --docker` does not make it |
+| The enablement variable still goes in                | It is a constant, not a setting, and a third-party provider or a gateway cannot receive the server-side enablement at all. See [plugin_eval.md](plugin_eval.md) |
+| No report is published                               | Publishing is never available on Bedrock, Vertex, Foundry or key auth. `--no-publish` is pinned, so nothing changes |
+
+Two things this route does not carry. Neither is designed and neither is built.
+
+- **A credential file.** Profile-based AWS or gcloud auth reads `~/.aws` or a gcloud
+  configuration directory, and no mount here carries either. A run on this route
+  authenticates through variables alone.
+- **A model alias.** `eval.model` and `eval.judge_model` default to `sonnet` and `haiku`, and
+  a provider that does not resolve an alias needs the full model identifier in those two
+  keys. Nothing here translates one.
 
 ## Mounts
 
@@ -321,13 +380,16 @@ container by hand must export it. See [plugin_eval.md](plugin_eval.md).
 | ----------------------------- | -------------------- | ---- | ---------------------------------------------- |
 | the plugin root               | `/work/plugin`       | ro   | The plugin under test                          |
 | the run's log dir             | `/work/logs`         | rw   | The only path the run may write outside `/tmp` |
-| `<login_dir>/.claude/`        | `$HOME/.claude`      | rw   | The login, above                               |
-| `<login_dir>/.claude.json`    | `$HOME/.claude.json` | rw   | The login, above                               |
+| `<login_dir>/.claude/`        | `$HOME/.claude`      | rw   | The login, above. Login route only             |
+| `<login_dir>/.claude.json`    | `$HOME/.claude.json` | rw   | The login, above. Login route only             |
 
 The plugin root is the nearest ancestor of the path argument holding
 `.claude-plugin/plugin.json`, and the target the harness is given inside the container is
 that path relative to it, under `/work/plugin`. A path with no plugin root above it is an
 error.
+
+The last two rows are the login route's. On the environment route a run mounts the plugin and
+the log directory and nothing else, and the credential arrives as a forwarded variable.
 
 Read-only everywhere except the log directory and the two credential paths. A case that
 writes into the consumer's checkout is a defect and must fail rather than succeed quietly.

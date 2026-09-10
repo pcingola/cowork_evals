@@ -590,7 +590,13 @@ def _test(args: argparse.Namespace, config: Config) -> int:
 
 
 def _setup(config: Config) -> int:
-    """Build the two images, then log in. An image already at its digest is `current`."""
+    """Build the two images, then log in. An image already at its digest is `current`.
+
+    The login step belongs to the login route alone. On the environment route there is
+    nothing interactive to do, and starting a login there would ask for a credential the run
+    will not read. It says which route it took, because a silent skip reads as a build that
+    forgot the login. docs/docker.md.
+    """
     image = Docker(config)
     test_image = PytestImage(config)
     for artefact in (image, test_image):
@@ -598,6 +604,9 @@ def _setup(config: Config) -> int:
             print(f"{artefact.tag}: current")
         else:
             artefact.build()
+    if image.uses_env_auth:
+        print(f"docker.auth_env: {', '.join(image.auth_env)}, so there is no login to make")
+        return OK
     if image.has_credential():
         print(f"{image.credentials_file}: current")
         return OK

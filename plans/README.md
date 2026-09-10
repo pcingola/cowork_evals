@@ -16,10 +16,11 @@ while the work happens.
 
 ## Plans
 
-Eight plans. Seven build something and are numbered in build order, and one of those seven
-is skipped. `plan_fix` builds nothing, so it carries no number: it corrects what the others
-wrote, and it ran before `plan_cowork_backend.md` because it changes what that plan and
-`plan_cli.md` both read. The order is the order they are built in, not a gate: a plan is
+Nine plans. Seven build something and are numbered in build order, and one of those seven
+is skipped. Two carry no number because neither builds a piece of the system: `plan_fix`
+corrects what the others wrote, and it ran before `plan_cowork_backend.md` because it changes
+what that plan and `plan_cli.md` both read; `plan_env_auth` adds a second credential route to
+a backend that already exists. The order is the order they are built in, not a gate: a plan is
 written whenever the developer decides to write it, and a plan whose inputs already exist is
 executable whether or not the plan before it is finished. `status` is the plan's own state,
 not the system's: what is built and usable is
@@ -35,6 +36,7 @@ not the system's: what is built and usable is
 | 6 | [`done/plan_cli.20260909.md`](done/plan_cli.20260909.md) | Scope resolution, the run directory, the gate, and the command                    | implemented | `feat/cli`            |
 | - | [`done/plan_fix.20260909.md`](done/plan_fix.20260909.md) | Nothing. One configuration file, one name per artifact, and the false statements  | implemented | `feat/fix-consistency` |
 | 7 | [`done/plan_consumer.20260909.md`](done/plan_consumer.20260909.md) | The shipped documentation, the `docs` and `init` verbs, and the eval-authoring skill | implemented | `feat/consumer`       |
+| - | [`plan_env_auth.md`](plan_env_auth.md) | Nothing new. A second credential route into the container, forwarded by name  | written     | `feat/env-auth`       |
 
 | Status        | Means                                                                     |
 | ------------- | --------------------------------------------------------------------------- |

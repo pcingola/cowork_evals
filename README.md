@@ -73,11 +73,33 @@ rm .claude/skills/cowork-evals/SKILL.md && cowork_evals init
 
 | Backend                    | You need                                                       |
 | -------------------------- | ---------------------------------------------------------------- |
-| The container, `--docker`  | Docker or Rancher Desktop running, the images, and the one-time login. `setup --docker` makes all three |
+| The container, `--docker`  | Docker or Rancher Desktop running, the images, and one credential route. `setup --docker` makes all three |
 | CoWork, `--cowork`         | macOS, `claude` on `PATH`, CoWork signed in, the profile named in `cowork_evals.yaml`, and the macOS Accessibility grant |
 
 `cowork_evals check --all` reports what each backend is still missing, and names the command
 that supplies it.
+
+The container takes one of two credential routes, and `docker.auth_env` in
+`cowork_evals.yaml` is what picks it.
+
+| `docker.auth_env`  | The route is                                                | Needs a browser |
+| ------------------ | ----------------------------------------------------------- | --------------- |
+| empty, the default | a login this package owns, made once by `setup --docker`    | yes, once       |
+| naming variables   | those variables, forwarded into the container by name        | no              |
+
+The second route is how a run reaches Bedrock, Vertex, Foundry or a gateway, and it is what
+makes the container backend unattended end to end:
+
+```yaml
+docker:
+  auth_env: [CLAUDE_CODE_USE_BEDROCK, AWS_BEARER_TOKEN_BEDROCK, ANTHROPIC_BEDROCK_BASE_URL, AWS_REGION]
+```
+
+Only the names go in the file. Each is emitted as `--env <NAME>` with no value, so Docker
+takes the value from the `cowork_evals` process's own environment and no credential reaches an
+argument list, a `--dry-run` listing, `run.log` or `docker inspect`. On that route the login is
+neither required nor mounted, `setup --docker` makes none, and `check --docker` does not report
+one. Both routes are [`docs/docker.md`](docs/docker.md).
 
 A CoWork run also takes the keyboard. Each case activates the application and sends Return to
 the frontmost window, so the machine is not yours while a suite runs, and there is no headless
@@ -90,12 +112,13 @@ than the code deployed to the account. The whole comparison is
 Three parts: install the package and build a backend, write and run an eval, and run a
 plugin's own pytest suite on the CoWork runtime.
 
-Everything below is the container backend. It needs no setting in `cowork_evals.yaml`: every
-key has a built-in default, and only the CoWork backend requires one. `init` is still the
-first step, because it also installs the eval-authoring skill and the `CLAUDE.md` block that
-tell a Claude Code session in your repository how any of this works. Every name is the
-example's own. The plugin is `notes`, it sits at `plugins/notes`, and it has one skill,
-`summarize`. Substitute yours throughout.
+Everything below is the container backend on its default credential route, which needs no
+setting in `cowork_evals.yaml`: every key has a built-in default, only the CoWork backend
+requires one, and `docker.auth_env` above is the one a Bedrock, Vertex, Foundry or gateway
+credential needs. `init` is still the first step, because it also installs the eval-authoring
+skill and the `CLAUDE.md` block that tell a Claude Code session in your repository how any of
+this works. Every name is the example's own. The plugin is `notes`, it sits at `plugins/notes`,
+and it has one skill, `summarize`. Substitute yours throughout.
 
 ### 1. Install
 
@@ -106,6 +129,9 @@ cowork_evals init             # the config, the skill, and the CLAUDE.md block
 cowork_evals setup --docker   # two images, and one interactive login. Minutes, and once only
 cowork_evals check --docker   # exits 0 when the backend is ready
 ```
+
+With `docker.auth_env` set, `setup --docker` builds the two images and makes no login, so it
+needs no terminal and no browser.
 
 ### 2. Evals
 
@@ -229,7 +255,7 @@ costs to run, is [`docs/approaches.md`](docs/approaches.md).
 
 ```bash
 cowork_evals init                    # the config, the skill, and the CLAUDE.md block
-cowork_evals setup --docker          # build the container images, and log in once
+cowork_evals setup --docker          # build the container images, and log in once if the route needs it
 cowork_evals check --all             # what each backend still needs, one line per backend
 cowork_evals run  --docker path/to/plugin          # an eval: a model, graders, a gate
 cowork_evals test --docker path/to/plugin/tests    # pytest on the CoWork runtime, no model
@@ -244,6 +270,10 @@ Every option has a default in `cowork_evals.yaml`, in the working directory. Tha
 only configuration route: nothing is read from the process environment, and there is no `.env`.
 `cowork_evals init` writes it with every key and every default. Runs write to `logs/` under the
 working directory.
+
+`docker.auth_env` holds variable names and no value, so the setting still comes from the file.
+The credential itself is a value rather than a setting, and Docker moves it into the container
+without this package reading it.
 
 ## The skill
 

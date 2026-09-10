@@ -296,7 +296,7 @@ def test_the_output_dir_is_the_log_mount(plugin, tmp_path):
 
 
 def test_the_two_login_paths_are_mounted_read_write(plugin, tmp_path):
-    """The one credential route. docs/docker.md."""
+    """The login credential route. docs/docker.md."""
     logs = tmp_path / "logs"
     logs.mkdir()
     docker = backend()
@@ -322,6 +322,78 @@ def test_run_argv_mounts_nothing_else_from_the_host(plugin, tmp_path):
     """The two login paths, the plugin and the logs. Nothing else."""
     argv = backend().run_argv(plugin, tmp_path, run_options())
     assert argv.count("-v") == 4
+
+
+# The environment credential route. docs/docker.md.
+
+BEDROCK = ("CLAUDE_CODE_USE_BEDROCK", "AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION")
+
+
+def test_an_empty_auth_env_is_the_login_route():
+    assert backend().uses_env_auth is False
+    assert backend(auth_env=()).uses_env_auth is False
+
+
+def test_a_named_variable_selects_the_environment_route():
+    assert backend(auth_env=BEDROCK).uses_env_auth is True
+
+
+def test_auth_env_argv_forwards_each_name_without_a_value():
+    argv = backend(auth_env=BEDROCK).auth_env_argv()
+    assert argv == [
+        "--env",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "--env",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "--env",
+        "AWS_REGION",
+    ]
+
+
+def test_no_forwarded_name_carries_an_equals_sign():
+    """A value in an argument list would reach a dry run, run.log and docker inspect."""
+    argv = backend(auth_env=BEDROCK).auth_env_argv()
+    assert [value for value in argv if "=" in value] == []
+
+
+def test_the_environment_route_mounts_the_plugin_and_the_logs_alone(plugin, tmp_path):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    argv = backend(auth_env=BEDROCK).run_argv(plugin, logs, run_options())
+    mounts = [argv[i + 1] for i, value in enumerate(argv) if value == "-v"]
+    assert mounts == [
+        f"{plugin.resolve()}:/work/plugin:ro",
+        f"{logs.resolve()}:/work/logs:rw",
+    ]
+
+
+def test_the_environment_route_forwards_the_names_into_the_run(plugin, tmp_path):
+    argv = backend(auth_env=BEDROCK).run_argv(plugin, tmp_path, run_options())
+    for name in BEDROCK:
+        assert name in argv
+
+
+def test_the_environment_route_still_carries_the_enablement_variable(plugin, tmp_path):
+    """A third-party provider cannot receive the server-side enablement at all."""
+    argv = backend(auth_env=BEDROCK).run_argv(plugin, tmp_path, run_options())
+    assert "CLAUDE_CODE_WALNUT_SPIRE=1" in argv
+    assert f"HOME={CONTAINER_HOME}" in argv
+
+
+def test_the_two_routes_are_never_both_in_one_run(plugin, tmp_path):
+    argv = backend(auth_env=BEDROCK).run_argv(plugin, tmp_path, run_options())
+    assert ".claude.json" not in " ".join(argv)
+
+
+def test_auth_env_is_not_a_build_input(tmp_path):
+    """It is a run-time route, so it must not change the tag an image was built under."""
+    assert backend(auth_env=BEDROCK).digest == backend().digest
+    assert "auth_env" not in json.dumps(backend(auth_env=BEDROCK).build_args)
+
+
+def test_the_login_argv_is_unchanged_by_the_environment_route():
+    """A developer on the environment route can still log in on purpose."""
+    assert backend(auth_env=BEDROCK).login_argv() == backend().login_argv()
 
 
 def credential(docker, **oauth) -> None:

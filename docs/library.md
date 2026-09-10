@@ -262,6 +262,11 @@ Options are flags, and their defaults are keys in `cowork_evals.yaml`, in the wo
 directory, the directory `logs/` is resolved from. That file is the only configuration route:
 nothing is read from the process environment, and there is no `.env`.
 
+`docker.auth_env` does not weaken that. It holds variable *names*, so the setting still comes
+from the file; the value is a credential rather than a setting, and it is forwarded to the
+container by Docker without this package reading it. Nothing in `src/cowork_evals/` reads
+`os.environ`. See [docker.md](docker.md).
+
 | Layer                 | Beats           | Is for                         |
 | --------------------- | --------------- | ------------------------------ |
 | A command-line option | every row below | one run                        |

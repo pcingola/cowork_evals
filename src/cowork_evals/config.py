@@ -92,6 +92,19 @@ def _tools(name: str, value: Any) -> tuple[str, ...]:
     return tuple(_text(name, item) for item in value)
 
 
+def _names(name: str, value: Any) -> tuple[str, ...]:
+    """A list of environment variable names. The value of one is never read here.
+
+    Separate from `_tools` because the message names what the list holds, and a reader of a
+    refusal has to know which of the two lists they mistyped.
+    """
+    if isinstance(value, str) or not isinstance(value, list | tuple):
+        raise CoWorkError(
+            2, f"{name}: expected a list of variable names, got {type(value).__name__}"
+        )
+    return tuple(_text(name, item) for item in value)
+
+
 def _convert(section: Any) -> None:
     """Run the section's whole table, so a value is converted in exactly one place."""
     for key, convert in section._FIELDS.items():
@@ -195,12 +208,16 @@ class DockerSection:
     claude_code_version: str = "2.1.265"
     login_dir: Path = Path("~/.cache/cowork_evals/claude")
     extra_ca_file: Path | None = None
+    # The names of the variables that carry a provider credential into the container, and
+    # never their values. Empty is the login route. docs/docker.md.
+    auth_env: tuple[str, ...] = ()
 
     _FIELDS: ClassVar[dict[str, Callable[[str, Any], Any]]] = {
         "platform": _text,
         "claude_code_version": _text,
         "login_dir": _path,
         "extra_ca_file": _optional_path,
+        "auth_env": _names,
     }
 
     def __post_init__(self) -> None:
