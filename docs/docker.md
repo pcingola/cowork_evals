@@ -383,6 +383,14 @@ Two things this route does not carry. Neither is designed and neither is built.
 | `<login_dir>/.claude/`        | `$HOME/.claude`      | rw   | The login, above. Login route only             |
 | `<login_dir>/.claude.json`    | `$HOME/.claude.json` | rw   | The login, above. Login route only             |
 
+There is no mount for the traces. A run keeping them sets `TMPDIR=/work/logs/tmp` instead, so
+the sandbox the harness makes is already inside the log mount. That is the whole mechanism: the
+harness creates each run's sandbox under `TMPDIR`, the container is started with `--rm`, and a
+sandbox anywhere else goes with the container. The host side of `/work/logs/tmp` is emptied
+once the run's artefacts have been taken out of it, so nothing under that name survives an
+invocation. What is taken out, and what a passing run keeps that a failing one does not, is
+[running_evals.md](running_evals.md).
+
 The plugin root is the nearest ancestor of the path argument holding
 `.claude-plugin/plugin.json`, and the target the harness is given inside the container is
 that path relative to it, under `/work/plugin`. A path with no plugin root above it is an
@@ -405,7 +413,8 @@ Only the run's own log directory is mounted, not the whole log root, because the
 every other path under it.
 
 The container runs with the host user's numeric uid and gid, so log files are not
-root-owned. That uid has no passwd entry, so `HOME` is set explicitly to a writable path
+root-owned. A kept sandbox is therefore the developer's to read and to delete: the harness
+leaves it read-only with its `sealed/` trees at mode 000, and the host chmods them back. That uid has no passwd entry, so `HOME` is set explicitly to a writable path
 under `/tmp`, created in the image world-writable.
 
 A uid with no passwd entry is the one thing here that can stop the CLI: Node's

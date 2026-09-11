@@ -440,6 +440,20 @@ def _turns(records: list[dict[str, Any]]) -> list[dict[str, str]]:
     return turns
 
 
+def final_text(transcript: Path | str) -> str | None:
+    """The last assistant text in one session transcript, as `collect` reads it.
+
+    It is what a `target: last_message` grader read on this backend, and [traces.py](traces.py)
+    writes it beside the transcript it copied. Public because that module needs the value and
+    must not parse this format a second time: a session transcript is read here, and the
+    harness's `trace.jsonl` is read there.
+
+    `None` when the transcript is absent, unreadable as JSON lines, or carries no assistant
+    text. Nothing here writes anywhere under the CoWork profile.
+    """
+    return _final_text(_turns(_read_jsonl(Path(transcript))))
+
+
 def _final_text(turns: list[dict[str, str]]) -> str | None:
     for turn in reversed(turns):
         if turn["role"] == "assistant":

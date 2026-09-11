@@ -35,6 +35,10 @@ ARM = "with"
 FAIL = "FAIL"
 NOTE = "NOTE"
 
+# How a line names where one run's artefacts are. What is in that directory is
+# docs/running_evals.md; the container backend fills it through traces.py.
+ARTIFACTS = "artifacts"
+
 
 @dataclass(frozen=True, slots=True)
 class GateResult:
@@ -126,11 +130,12 @@ def _judge_run(
     that timed out, hit the turn cap or exited non-zero, each of which is still graded on
     what it produced, so the score alone does not catch it.
     """
+    kept = artifacts(run)
     error = run.get("error")
     if error:
-        failures.append(f"{FAIL} {where}: {error}")
+        failures.append(f"{FAIL} {where}: {error}{kept}")
     for result in run.get("graders") or []:
-        _judge_grader(where, result, definitions, failures, notes)
+        _judge_grader(where, result, definitions, failures, notes, kept)
 
 
 def _judge_grader(
@@ -139,11 +144,16 @@ def _judge_grader(
     definitions: dict[Any, Any],
     failures: list[str],
     notes: list[str],
+    kept: str = "",
 ) -> None:
     """One grader result, joined to its definition by name to learn its class.
 
     A result carries `name`, `passed` and `scored` and never `type`, so the definition is
     the only route to the class. docs/running_evals.md.
+
+    `kept` is the run's artefact suffix, on every line a person would investigate: a judged
+    note needs the transcript as much as a structural failure does. A skip and an undefined
+    grader do not carry one, because neither is a verdict about what the model produced.
     """
     name = result.get("name")
     at = f"{where}: {name}"
@@ -159,11 +169,40 @@ def _judge_grader(
     if result.get("passed"):
         return
     kind = definitions[name]
-    line = f"{at}: the {kind} grader failed: {result.get('explanation')}"
+    line = f"{at}: the {kind} grader failed: {result.get('explanation')}{kept}"
     if kind in JUDGED:
         notes.append(f"{NOTE} {line}")
     else:
         failures.append(f"{FAIL} {line}")
+
+
+def artifacts(run: dict[str, Any]) -> str:
+    """What one run left on the host, as the suffix a failure line carries.
+
+    `tracePath` is where the trace is, and every other artefact of that run sits beside it,
+    so naming its directory names all of them. It is the container backend's collected
+    directory once `traces.collect` has rewritten it, and the session's transcript
+    directory on CoWork.
+
+    Empty when there is no such directory, which is a run whose trace was not collected and
+    a document written before this was built. The gate never names a path that is not there.
+    """
+    named = run.get("tracePath")
+    if not isinstance(named, str) or not named:
+        return ""
+    directory = Path(named).parent
+    if not directory.is_dir():
+        return ""
+    return f" [{ARTIFACTS}: {_display(directory)}]"
+
+
+def _display(directory: Path) -> str:
+    """The directory as a person types it: relative to the working directory when it is
+    under one, and absolute when it is not."""
+    try:
+        return str(directory.relative_to(Path.cwd()))
+    except ValueError:
+        return str(directory)
 
 
 # The summary.

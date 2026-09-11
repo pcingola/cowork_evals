@@ -22,6 +22,7 @@ from ..cases import CaseError
 from ..cases import plugin_root as cases_plugin_root
 from ..config import Config
 from ..harness import ENABLEMENT_ENV, RESULT_NAME, RunOptions, eval_argv
+from ..traces import SANDBOX_DIR, sandbox_root
 
 DOCKERFILE = Path(__file__).parent / "Dockerfile"
 DATA = Path(__file__).parent.parent / "data"
@@ -45,6 +46,12 @@ CONTAINER_HOME = "/tmp/eval-home"
 CONTAINER_WORK = "/work"
 CONTAINER_PLUGIN = f"{CONTAINER_WORK}/plugin"
 CONTAINER_LOGS = f"{CONTAINER_WORK}/logs"
+
+# Where the harness puts a run's sandbox when the run is keeping its trace. It is inside the
+# log mount, which is the only writable host path, so a sandbox `--keep-temp` kept survives
+# the container that `--rm` removes. The host half of the same path is `traces.sandbox_root`.
+# docs/docker.md.
+CONTAINER_TMPDIR = f"{CONTAINER_LOGS}/{SANDBOX_DIR}"
 
 # An optional extra root CA, for a host whose network inspects TLS. The host path is
 # `docker.extra_ca_file`, and the certificate itself never enters this repository. The
@@ -356,6 +363,11 @@ class Docker:
         The plugin root goes in read-only and the run's log directory read-write. Nothing
         else from the host is mounted, and the harness writes its output into the log
         mount rather than under the plugin. docs/docker.md.
+
+        A run keeping its trace also moves the harness's `TMPDIR` into the log mount, so
+        that the sandbox `--keep-temp` keeps is on the host when the container is gone.
+        `run` creates that directory: the harness makes a sandbox inside it and not the
+        directory itself.
         """
         root = plugin_root(target)
         relative = Path(target).resolve().relative_to(root)
@@ -364,6 +376,7 @@ class Docker:
             container_target = f"{CONTAINER_PLUGIN}/{relative.as_posix()}"
         return [
             *self.run_preamble(),
+            *(["--env", f"TMPDIR={CONTAINER_TMPDIR}"] if options.keep_traces else []),
             "-v",
             f"{root}:{CONTAINER_PLUGIN}:ro",
             "-v",
@@ -456,9 +469,16 @@ class Docker:
         The caller creates `output_dir` first, and owns naming it. A non-zero exit is not
         itself a failure: the harness exits 1 below threshold and 2 on partial results,
         and the gate reads the document either way. No document at all is.
+
+        The sandbox directory is created here rather than by the harness, which makes a
+        sandbox inside `TMPDIR` and not `TMPDIR` itself. What is kept out of it afterwards
+        is `traces.collect`, which the caller runs: this method starts one container and
+        reads nothing it wrote.
         """
         options = options if options is not None else RunOptions.resolve(self._config)
         output_dir = Path(output_dir).resolve()
+        if options.keep_traces:
+            sandbox_root(output_dir).mkdir(parents=True, exist_ok=True)
         completed = subprocess.run(self.run_argv(target, output_dir, options))
         result = output_dir / RESULT_NAME
         if not result.is_file():

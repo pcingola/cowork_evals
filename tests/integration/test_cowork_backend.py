@@ -20,7 +20,8 @@ from typing import Any
 
 import pytest
 
-from cowork_evals import Config, CoWork, CoWorkError, CoWorkSection
+from cowork_evals import Config, CoWork, CoWorkError, CoWorkSection, traces
+from cowork_evals.cowork import TRANSCRIPTS
 from cowork_evals.cowork_backend import run
 from cowork_evals.harness import RESULT_NAME
 
@@ -163,3 +164,23 @@ def test_the_smoke_suite_runs_and_the_case_passes(tmp_path: Path) -> None:
     assert entry["error"] is None
     assert entry["passed"] is True, [grader["explanation"] for grader in entry["graders"]]
     assert case["aggregates"] == {"score": 1.0, "passRate": 1.0}
+
+    # The same run, collected the way the command collects it. A real session transcript and
+    # a real `outputs/` cannot be reached without one.
+    session = Path(entry["cowork"]["sessionDir"])
+    assert traces.collect(output) == []
+
+    kept = traces.run_dir(output, "python-version", 1)
+    assert (kept / traces.TRACE_NAME).is_file(), f"no trace under {kept}"
+    assert "3.10.12" in (kept / traces.LAST_MESSAGE_NAME).read_text(encoding="utf-8")
+
+    # The document points at the copy, and still names the session it came from.
+    written_again = json.loads(written.read_text(encoding="utf-8"))
+    collected = written_again["cases"][0]["arms"]["with"][0]
+    assert Path(collected["tracePath"]) == kept / traces.TRACE_NAME
+    assert collected["cowork"]["sessionDir"] == str(session)
+
+    # Copied, never moved: the profile is the account's own record.
+    assert session.is_dir()
+    assert (session / "audit.jsonl").is_file()
+    assert list((session / TRANSCRIPTS).glob("*.jsonl")), "the transcript left the session"

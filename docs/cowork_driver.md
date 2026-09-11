@@ -52,7 +52,10 @@ Two modules, and PyYAML.
 | `cowork_evals.cowork`      | `CoWork`, the driver                                        |
 
 `Config`, its three sections, `CoWork` and `CoWorkError` are the driver's whole public
-surface, and they are the names re-exported from `cowork_evals`. The backend's modules are
+surface, and they are the names re-exported from `cowork_evals`. One module function stands
+beside them, `cowork.final_text`, which reads the last assistant text out of one session
+transcript on disk. It exists because `traces.py` writes that text beside the transcript it
+copies, and the session transcript format is parsed here and must not be parsed twice. The backend's modules are
 imported by their own names, and every module this package ships is the table in
 [library.md](library.md). There is no module level function in either module here, so a
 caller passes a configuration once and calls methods on the object that holds it. A `CoWork`

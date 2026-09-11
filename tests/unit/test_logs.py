@@ -283,3 +283,31 @@ def test_the_descriptors_are_restored_after_a_raise(tmp_path: Path) -> None:
     except RuntimeError:
         pass
     assert (os.fstat(1).st_ino, os.fstat(2).st_ino) == before
+
+
+# Deleting a tree the harness left unreadable.
+
+
+def test_a_sealed_tree_is_unsealed_and_removed(tmp_path: Path) -> None:
+    """`--keep-temp` leaves the sandbox read-only and its `sealed/` at mode 000.
+
+    A plain `rmtree` raises on that, and a run directory holding one would never be pruned.
+    """
+    sealed = tmp_path / "sandbox" / "sealed" / "home"
+    sealed.mkdir(parents=True)
+    (sealed / "note.txt").write_text("written by the plugin under test", encoding="utf-8")
+    (tmp_path / "sandbox" / "sealed").chmod(0o000)
+    (tmp_path / "sandbox").chmod(0o500)
+
+    logs.remove_tree(tmp_path / "sandbox")
+    assert not (tmp_path / "sandbox").exists()
+
+
+def test_pruning_removes_a_run_directory_holding_a_sealed_tree(tmp_path: Path) -> None:
+    old = tmp_path / "20260101-000000-smoke"
+    (old / "smoke" / "tmp" / "claude-eval-Ab12Cd" / "sealed").mkdir(parents=True)
+    (old / "smoke" / "tmp" / "claude-eval-Ab12Cd" / "sealed").chmod(0o000)
+    (old / "smoke" / "tmp" / "claude-eval-Ab12Cd").chmod(0o500)
+
+    assert logs.prune(tmp_path, days=1) == [old]
+    assert not old.exists()

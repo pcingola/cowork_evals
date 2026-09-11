@@ -31,6 +31,7 @@ eval:
   # allow_tools: [Bash]
   # max_cost_usd: 5
   # max_cost_total_usd: 25
+  # keep_traces: true
 
 # The container backend. docs/docker.md.
 docker:

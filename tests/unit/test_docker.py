@@ -19,6 +19,7 @@ from cowork_evals.docker import (
     CONTAINER_HOME,
     CONTAINER_LOGS,
     CONTAINER_PLUGIN,
+    CONTAINER_TMPDIR,
     CONTAINER_WORK,
     DATA,
     DOCKERFILE,
@@ -252,8 +253,14 @@ def plugin(tmp_path):
     return root
 
 
-def run_options() -> RunOptions:
-    return RunOptions(model="sonnet", judge_model="haiku", max_cost_usd="5", allow_tools=("Bash",))
+def run_options(**overrides) -> RunOptions:
+    fixed = {
+        "model": "sonnet",
+        "judge_model": "haiku",
+        "max_cost_usd": "5",
+        "allow_tools": ("Bash",),
+    }
+    return RunOptions(**{**fixed, **overrides})
 
 
 def test_run_argv_mounts_the_plugin_read_only_and_the_logs_read_write(plugin, tmp_path):
@@ -394,6 +401,18 @@ def test_auth_env_is_not_a_build_input(tmp_path):
 def test_the_login_argv_is_unchanged_by_the_environment_route():
     """A developer on the environment route can still log in on purpose."""
     assert backend(auth_env=BEDROCK).login_argv() == backend().login_argv()
+def test_a_run_keeping_its_traces_puts_the_harness_tmpdir_in_the_log_mount(plugin, tmp_path):
+    """The log mount is the only writable host path, so a kept sandbox has to land there."""
+    argv = backend().run_argv(plugin, tmp_path, run_options(keep_traces=True))
+    assert f"TMPDIR={CONTAINER_TMPDIR}" in argv
+    assert CONTAINER_TMPDIR.startswith(f"{CONTAINER_LOGS}/")
+    assert "--keep-temp" in argv
+
+
+def test_a_run_that_keeps_no_trace_moves_no_tmpdir_and_keeps_no_sandbox(plugin, tmp_path):
+    argv = backend().run_argv(plugin, tmp_path, run_options(keep_traces=False))
+    assert not [value for value in argv if value.startswith("TMPDIR=")]
+    assert "--keep-temp" not in argv
 
 
 def credential(docker, **oauth) -> None:

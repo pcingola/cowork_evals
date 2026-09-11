@@ -15,7 +15,7 @@ import pytest
 from cowork_evals import cli, logs, preflight, results
 from cowork_evals.cases import plugin_name, plugin_roots
 from cowork_evals.cli import USAGE, main, parse_args
-from cowork_evals.config import Config
+from cowork_evals.config import Config, EvalSection
 from cowork_evals.docker import Docker
 from cowork_evals.docker.pytest_image import PytestImage
 from cowork_evals.harness import RESULT_NAME
@@ -72,6 +72,35 @@ def test_run_takes_a_backend_a_path_and_every_option() -> None:
     assert args.dry_run
 
 
+def test_the_traces_option_is_three_state() -> None:
+    """Untyped is `None`, so both forms beat a file and neither is confused with it."""
+    assert parse("run", "--docker", "plugin/evals").keep_traces is None
+    assert parse("run", "--docker", "plugin/evals", "--keep-traces").keep_traces is True
+    assert parse("run", "--docker", "plugin/evals", "--no-keep-traces").keep_traces is False
+
+
+def test_the_traces_option_reaches_the_harness_options() -> None:
+    """An option beats the file, and the file beats the built-in default. docs/library.md."""
+    off = Config(eval=EvalSection(keep_traces=False))
+    typed = parse("run", "--docker", "plugin/evals", "--keep-traces")
+    untyped = parse("run", "--docker", "plugin/evals")
+    assert cli._options(typed, off, ()).keep_traces is True
+    assert cli._options(untyped, off, ()).keep_traces is False
+    assert cli._options(untyped, Config(), ()).keep_traces is True
+
+
+@pytest.mark.parametrize("backend", ["--docker", "--cowork"])
+def test_the_same_ladder_decides_it_on_either_backend(backend) -> None:
+    """`_keeping` is the one place the option meets the file, for both backends."""
+    off = Config(eval=EvalSection(keep_traces=False))
+    assert cli._keeping(parse("run", backend, "plugin/evals"), Config()) is True
+    assert cli._keeping(parse("run", backend, "plugin/evals"), off) is False
+    assert cli._keeping(parse("run", backend, "plugin/evals", "--keep-traces"), off) is True
+    assert (
+        cli._keeping(parse("run", backend, "plugin/evals", "--no-keep-traces"), Config()) is False
+    )
+
+
 def test_run_defaults_every_option_to_nothing() -> None:
     args = parse("run", "--cowork", "plugin/evals")
     assert (args.runs, args.timeout_seconds, args.model, args.judge_model) == (
@@ -90,6 +119,7 @@ def test_run_defaults_every_option_to_nothing() -> None:
     assert not args.build_missing
     assert not args.require_coverage
     assert not args.dry_run
+    assert args.keep_traces is None
 
 
 def test_test_takes_a_path_two_flags_and_a_tail() -> None:
@@ -246,6 +276,20 @@ def test_an_option_the_cowork_backend_refuses_returns_two(option, value, capsys)
 def test_build_missing_is_refused_on_cowork(capsys) -> None:
     assert main(["run", "--cowork", "plugin/evals", "--build-missing"]) == USAGE
     assert "--build-missing is not accepted on --cowork" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("form", ["--keep-traces", "--no-keep-traces"])
+def test_either_form_of_the_traces_option_is_accepted_on_both_backends(form) -> None:
+    """Both backends keep the same three artefacts, so neither refuses the option."""
+    for backend in ("--docker", "--cowork"):
+        typed = parse("run", backend, "plugin/evals", form).keep_traces
+        assert typed is (form == "--keep-traces")
+
+
+@pytest.mark.parametrize("backend", ["--docker", "--cowork", "--all"])
+def test_a_verb_that_does_not_carry_a_refused_option_refuses_nothing(backend) -> None:
+    """`check` takes a backend and nothing else, so an option it never had is not typed."""
+    assert cli.refusal(parse("check", backend)) is None
 
 
 def test_timeout_seconds_is_refused_on_docker(capsys) -> None:

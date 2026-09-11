@@ -7,6 +7,7 @@ docs/running_evals.md. See ../README.md.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -29,6 +30,29 @@ def run_directory(root: Path, **plugins: str) -> Path:
         if document:
             shutil.copy(DOCUMENTS / f"{document}.json", directory / RESULT_NAME)
     return root
+
+
+def with_trace(directory: Path, trace: Path) -> None:
+    """Point every run of the document in `directory` at one trace on disk.
+
+    The path is the test's own, because a document's `tracePath` is absolute and no file
+    under tests/data can name a directory that exists on the machine running it. What is
+    asserted is still a literal: the directory the test created.
+    """
+    path = directory / RESULT_NAME
+    document = json.loads(path.read_text(encoding="utf-8"))
+    for case in document["cases"]:
+        for run in case["arms"]["with"]:
+            run["tracePath"] = str(trace)
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+
+def collected(root: Path, case: str = "every-structural", index: int = 1) -> Path:
+    """One collected run directory holding a trace, as traces.py leaves it."""
+    directory = root / "traces" / case / f"run-{index}"
+    directory.mkdir(parents=True)
+    (directory / "trace.jsonl").write_text("{}\n", encoding="utf-8")
+    return directory / "trace.jsonl"
 
 
 def failures(result: GateResult) -> list[str]:
@@ -197,3 +221,47 @@ def test_two_passing_plugins_are_one_pass(tmp_path: Path) -> None:
     result = gate(run_directory(tmp_path, mail="pass", writer="pass"))
     assert result.passed
     assert result.lines[-1] == "2 cases, 2 passed, overall score 1.00"
+
+
+# What a failure line says about where to look.
+
+
+def test_a_structural_failure_names_the_run_artefacts(tmp_path: Path, working_directory) -> None:
+    """The whole point of keeping a trace: the line that fails says where the trace is."""
+    root = run_directory(tmp_path, smoke="structural_failures")
+    with_trace(root / "smoke", collected(root / "smoke"))
+    with working_directory(tmp_path):
+        result = gate(root)
+    assert failures(result)[0].endswith("[artifacts: smoke/traces/every-structural/run-1]"), (
+        failures(result)[0]
+    )
+
+
+def test_a_judged_note_names_them_too(tmp_path: Path, working_directory) -> None:
+    """A judged grader gates nothing and still has to be investigated."""
+    root = run_directory(tmp_path, smoke="judged_failure")
+    with_trace(root / "smoke", collected(root / "smoke", "judged"))
+    with working_directory(tmp_path):
+        result = gate(root)
+    assert notes(result)[0].endswith("[artifacts: smoke/traces/judged/run-1]")
+
+
+def test_an_errored_run_names_them(tmp_path: Path, working_directory) -> None:
+    root = run_directory(tmp_path, smoke="run_error")
+    with_trace(root / "smoke", collected(root / "smoke", "timed-out"))
+    with working_directory(tmp_path):
+        result = gate(root)
+    assert any("[artifacts: smoke/traces/timed-out/run-1]" in line for line in failures(result))
+
+
+def test_a_document_whose_trace_was_not_collected_names_nothing(tmp_path: Path) -> None:
+    """The gate never names a path that is not there, so a run with no trace reads as before."""
+    root = run_directory(tmp_path, smoke="structural_failures")
+    with_trace(root / "smoke", Path("/work/logs/tmp/claude-eval-Ab12Cd/out/trace.jsonl"))
+    result = gate(root)
+    assert failures(result)[0].endswith("no match for Alex")
+
+
+def test_a_document_carrying_no_trace_path_names_nothing(tmp_path: Path) -> None:
+    result = gate(run_directory(tmp_path, smoke="structural_failures"))
+    assert failures(result)[0].endswith("no match for Alex")

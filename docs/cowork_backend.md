@@ -15,7 +15,9 @@ is reached as `cowork_evals run --cowork <path>`.
 - **Grading is total.** Nothing in the grading layer raises: an unknown grader type, an
   uncompilable pattern and an unreadable file are each a failed grader carrying the reason.
 - **A produced file means a file under `outputs/`.** That is the one place a produced file is
-  readable from the host.
+  readable from the host, and it is what a kept run's `workspace/` is copied from.
+- **Nothing under the profile is written.** The traces are copied out of a session directory,
+  never moved, and the session is left exactly as the application left it.
 - **Skips are recorded, never silent**, and the gate fails a run that reports one.
 - **The plugin under test is not loaded.** A case path selects which cases run, not which code
   runs.
@@ -102,11 +104,21 @@ contract is additive-only, which is what permits these. Nothing else here depart
 | ---------------------------------- | ----------------- | --------------------------------------------------------- |
 | `skipped`, `skipReason`            | a case            | Why the case submitted nothing. `arms.with` is empty     |
 | `skipped`, `skipReason`            | a grader result   | Why that grader was not scored                           |
-| `cowork.sessionDir`                | a run             | The session, which is what re-grades a stored run without submitting again |
+| `cowork.sessionDir`                | a run             | The session, which is what re-grades a stored run without submitting again, and where the run's artefacts are copied from |
 | `cowork.timeoutSeconds`            | a run             | The timeout that run ran under, which is the override where one was given. It is the one place an effective value is recorded |
 | `scored`                           | a grader result   | `not skipped`, widening the reference's `not withOnly` to the one other exclusion this backend has |
 
 `withOnly` is always `false`: `ablation` is `none` here and nothing is dropped for an arm.
+
+**The `cowork` key is also what says which backend produced a run.** The harness writes no
+such key, so its presence is the rule that decides where one run's artefacts are read from
+when the traces are collected: a session directory here, and a kept sandbox there. It is the
+key and never its value, because a run the driver could not start carries the key with a null
+`sessionDir`. See [running_evals.md](running_evals.md).
+
+`tracePath` is the session's transcript when the document is written, and is rewritten to the
+copy under the run's log directory once that copy is made. The session itself is still named,
+in `cowork.sessionDir`. That is what makes a gate line say the same thing on both backends.
 
 One behaviour departs as well. `casesPassed` is the reference's rule, a case scoring at or
 above `threshold`, minus every skipped case. `threshold` is 0 here, so without that
@@ -120,8 +132,9 @@ Two fields mean something narrower here than they do under the harness.
 | `claudeVersion` | The host `claude --version`. No CLI ran this suite, and that version is the judge's |
 | `costUsd`       | The judge spend, and nothing else. A CoWork run is billed to the account and is not observable from the host. It is never estimated |
 
-A CoWork run writes `aggregate-result.json` and nothing else. There is no `report.html` on
-this backend.
+A CoWork run writes `aggregate-result.json` and the run's artefacts under `traces/`. There is
+no `report.html` on this backend, and the artefacts carry the same three names the container
+backend leaves. The log layout is [running_evals.md](running_evals.md).
 
 Skips are recorded, never silent. A grader with no equivalent, and a case whose frontmatter
 writes out a key this backend cannot honour, are both written into the result document as

@@ -178,6 +178,29 @@ case blocks a single-case run. There is no option to skip validation.
 
 `test` is the exception: it returns pytest's exit code unchanged.
 
+## Reading a failure
+
+Every run leaves its transcript on the host, on either backend and passing runs included, so
+a failure is investigated without running the suite again, against a run that passed and
+against the same case on the other backend. A failing line names the directory:
+
+```
+FAIL smoke/one-paragraph: run 2: is-one-paragraph: the regex grader failed: pattern not found
+  in last_message [artifacts: logs/evals/<stamp>-smoke/smoke/traces/one-paragraph/run-2]
+```
+
+| In that directory  | Is                                                                   |
+| ------------------ | -------------------------------------------------------------------- |
+| `last_message.txt` | The final assistant message, which is what a `last_message` grader read |
+| `trace.jsonl`      | Every turn and every tool call, one JSON object per line              |
+| `workspace/`       | The agent's working directory                                         |
+
+The three names are the same on `--docker` and `--cowork`. `trace.jsonl` is whatever format
+the backend that produced it wrote, and the two are close but not identical: a harness trace
+ends in a `result` record and a CoWork one does not. `cowork_evals docs running_evals` has the
+table, and it names the document that owns each format. `--no-keep-traces` turns it off, and
+`eval.keep_traces: false` does the same from the file.
+
 ## The runtime under test
 
 A CoWork session is Python 3.10 with a fixed wheel set. Every file under the path passed to

@@ -42,6 +42,7 @@ class RunOptions:
     judge_model: str
     max_cost_usd: str
     allow_tools: tuple[str, ...]
+    keep_traces: bool = True
     runs: int | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
     case: str | None = None
@@ -55,6 +56,7 @@ class RunOptions:
         judge_model: str | None = None,
         max_cost_usd: str | None = None,
         allow_tools: tuple[str, ...] | None = None,
+        keep_traces: bool | None = None,
         runs: int | None = None,
         tags: tuple[str, ...] = (),
         case: str | None = None,
@@ -63,7 +65,8 @@ class RunOptions:
 
         `config` defaults to `cowork_evals.yaml` in the working directory. `allow_tools`
         replaces the configured value rather than adding to it, so a widened value names
-        `Bash` again.
+        `Bash` again. `keep_traces` is a three-state argument: `None` is the option not
+        typed, and both `True` and `False` beat the file.
         """
         settings = (config if config is not None else Config.load()).eval
         return cls(
@@ -71,6 +74,7 @@ class RunOptions:
             judge_model=judge_model if judge_model is not None else settings.judge_model,
             max_cost_usd=(max_cost_usd if max_cost_usd is not None else str(settings.max_cost_usd)),
             allow_tools=allow_tools if allow_tools is not None else settings.allow_tools,
+            keep_traces=keep_traces if keep_traces is not None else settings.keep_traces,
             runs=runs,
             tags=tags,
             case=case,
@@ -109,6 +113,10 @@ def eval_argv(target: Path | str, output_dir: Path | str, options: RunOptions) -
         "--no-scaffold",
         "--verbose",
     ]
+    if options.keep_traces:
+        # Every run's sandbox is kept, not only an errored run's. Where it is kept is the
+        # backend's `TMPDIR`, and what is kept out of it is traces.py.
+        argv.append("--keep-temp")
     if options.runs is not None:
         argv += ["--runs", str(options.runs)]
     if options.case is not None:

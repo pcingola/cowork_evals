@@ -106,10 +106,17 @@ was rejected; 130 interrupted; 143 terminated.
 | `--output-dir`    | Puts `aggregate-result.json` and `report.html` in a log directory rather than under the plugin                                                       |
 | `--no-publish`    | The HTML report is otherwise published to claude.ai                                                                                                  |
 | `--no-scaffold`   | `context.scaffold_script` runs author-supplied shell as the invoking user                                                                            |
+| `--keep-temp`     | Without it every passing run's sandbox is deleted, and its `trace.jsonl` with it. There is then nothing to read after a failure                     |
 
 Do not pass `--json`. It silences progress lines, per-case grader lines, notices and the
 summary table, and an errored run's sandbox is not kept. `--output-dir` gives the same
 document with none of that loss.
+
+A run's sandbox is created under `TMPDIR`, so where a kept sandbox lands is the caller's to
+choose. That is how the container backend gets one onto the host:
+[docker.md](docker.md). A kept sandbox is left read-only, with the two trees the plugin under
+test wrote at mode 000 under `sealed/`, and `out/trace.jsonl` readable beside them. Measured
+2026-09-10 against the CLI the image installs.
 
 ## Limits a case author has to know
 

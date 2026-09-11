@@ -86,6 +86,12 @@ def _optional_path(name: str, value: Any) -> Path | None:
     return None if value is None else _path(name, value)
 
 
+def _flag(name: str, value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise CoWorkError(2, f"{name}: expected true or false, got {type(value).__name__}")
+    return value
+
+
 def _tools(name: str, value: Any) -> tuple[str, ...]:
     if isinstance(value, str) or not isinstance(value, list | tuple):
         raise CoWorkError(2, f"{name}: expected a list of tool names, got {type(value).__name__}")
@@ -185,6 +191,9 @@ class EvalSection:
     # `claude plugin eval` argument list: `cli.py` checks the spend so far before each
     # plugin, and a stop becomes a gate failure. docs/running_evals.md.
     max_cost_total_usd: int | float = 25
+    # On, so a failing case can be diagnosed without running the suite again. It is the one
+    # `eval:` key the CoWork backend does not read. docs/running_evals.md.
+    keep_traces: bool = True
 
     _FIELDS: ClassVar[dict[str, Callable[[str, Any], Any]]] = {
         "model": _text,
@@ -192,6 +201,7 @@ class EvalSection:
         "allow_tools": _tools,
         "max_cost_usd": _amount,
         "max_cost_total_usd": _amount,
+        "keep_traces": _flag,
     }
 
     def __post_init__(self) -> None:

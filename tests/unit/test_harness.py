@@ -16,6 +16,7 @@ def options(**overrides) -> RunOptions:
         "judge_model": "haiku",
         "max_cost_usd": "5",
         "allow_tools": ("Bash",),
+        "keep_traces": True,
     }
     return RunOptions(**{**fixed, **overrides})
 
@@ -29,7 +30,11 @@ def value_after(argv: list[str], flag: str) -> str:
 
 def test_the_built_in_defaults_apply_when_the_file_carries_no_eval_section():
     assert RunOptions.resolve(Config()) == RunOptions(
-        model="sonnet", judge_model="haiku", max_cost_usd="5", allow_tools=("Bash",)
+        model="sonnet",
+        judge_model="haiku",
+        max_cost_usd="5",
+        allow_tools=("Bash",),
+        keep_traces=True,
     )
 
 
@@ -49,6 +54,20 @@ def test_an_omitted_config_is_read_from_the_working_directory(working_directory,
     (tmp_path / "cowork_evals.yaml").write_text("eval:\n  judge_model: opus\n", encoding="utf-8")
     with working_directory(tmp_path):
         assert RunOptions.resolve().judge_model == "opus"
+
+
+def test_the_traces_are_kept_unless_the_file_turns_them_off():
+    assert RunOptions.resolve(Config()).keep_traces is True
+    assert RunOptions.resolve(Config(eval=EvalSection(keep_traces=False))).keep_traces is False
+
+
+def test_either_form_of_the_traces_argument_beats_the_file():
+    """It is three-state: `None` is the option not typed, and both booleans beat the file."""
+    off = Config(eval=EvalSection(keep_traces=False))
+    on = Config(eval=EvalSection(keep_traces=True))
+    assert RunOptions.resolve(off, keep_traces=True).keep_traces is True
+    assert RunOptions.resolve(on, keep_traces=False).keep_traces is False
+    assert RunOptions.resolve(off, keep_traces=None).keep_traces is False
 
 
 def test_a_whole_cost_is_emitted_without_a_decimal_point():
@@ -98,8 +117,18 @@ def test_the_threshold_and_the_ablation_cannot_be_overridden():
 
 def test_nothing_unasked_is_emitted():
     argv = eval_argv("/work/plugin/evals", "/work/logs", options())
-    for flag in ("--runs", "--case", "--tag", "--report", "--keep-temp", "--mocks", "--eval-dir"):
+    for flag in ("--runs", "--case", "--tag", "--report", "--mocks", "--eval-dir"):
         assert flag not in argv
+
+
+def test_keep_temp_is_emitted_when_the_run_keeps_its_traces():
+    """Without it only an errored run's sandbox is kept, and no passing run leaves a trace."""
+    assert "--keep-temp" in eval_argv("/work/plugin/evals", "/work/logs", options())
+
+
+def test_keep_temp_is_not_emitted_when_the_traces_are_turned_off():
+    argv = eval_argv("/work/plugin/evals", "/work/logs", options(keep_traces=False))
+    assert "--keep-temp" not in argv
 
 
 def test_the_optional_flags_are_emitted_when_asked():

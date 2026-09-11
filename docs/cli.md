@@ -92,6 +92,7 @@ runs on one backend of two, so a pass-through would be silently ignored on the o
 | `--judge-model M`        | yes        | yes, for judged graders                |
 | `--allow-tools T...`     | yes        | refused, the session decides           |
 | `--max-cost-usd N`       | yes        | refused, the driver's `max_runs` binds |
+| `--keep-traces`          | yes        | yes                                    |
 | `--tag T`, `--case GLOB` | yes        | yes                                    |
 | `--out DIR`              | yes        | yes                                    |
 | `--require-coverage`     | yes        | yes                                    |
@@ -103,6 +104,15 @@ timeout flag to map it onto. Only the CoWork backend sets a per-case `run_timeou
 
 `--require-coverage` reads the tree and not a backend, so no backend refuses it. It is off by
 default.
+
+`--keep-traces` is on by default and `--no-keep-traces` turns it off, which is what puts each
+run's transcript, final assistant message and workspace under the run's log directory. Both
+backends honour it and both leave the same three names, so no backend refuses it. What is
+kept, where it is read from and what is thrown away is
+[running_evals.md](running_evals.md). It is the one option of the three states: untyped is the
+file's value, and both `--keep-traces` and `--no-keep-traces` beat the file. `False` is a
+value an operator typed and not a default, which is why the refusal table cannot read it as
+untyped and why the option carries both forms.
 
 `--out DIR` replaces the whole `logs/evals` root, so the run directory is
 `<out>/<stamp>-<scope>`. It is accepted on `prune` too, which otherwise resolves
@@ -126,7 +136,7 @@ prints differs per backend, because only one of them builds a command line.
 
 | Backend    | Prints                                                                        |
 | ---------- | ------------------------------------------------------------------------------- |
-| `--docker` | the `docker run` command line, one argument per line                          |
+| `--docker` | the `docker run` command line, one argument per line, `--keep-temp` and the `TMPDIR` behind it included |
 | `--cowork` | one line per case with its run count, its timeout and its skips, then the rate ceiling arithmetic |
 
 The skips are the point of the CoWork dry run: a skipped case fails the gate, so an operator

@@ -5,6 +5,10 @@ backend takes a case path and an output directory and returns the path of the re
 wrote; naming that directory, recording the environment, pointing `latest`, pruning and
 capturing the terminal are all here.
 
+This module owns every path an invocation writes, and is the only thing that deletes one.
+What a backend leaves inside one of those paths is that backend's, and what is lifted out of
+a harness sandbox into one is [traces.py](traces.py).
+
 Nothing here reads a case, decides pass or fail or prints. Printing happens in [cli.py](cli.py).
 """
 
@@ -204,6 +208,45 @@ def point_latest(root: Path | str, run_directory: Path | str) -> Path:
     return link
 
 
+# Deleting.
+
+
+def unseal(path: Path | str) -> None:
+    """Make a tree readable and writable again, from the top down.
+
+    `claude plugin eval --keep-temp` leaves each kept sandbox read-only, with the two trees
+    the plugin under test wrote at mode 000 under `sealed/`. Nothing can be read out of one
+    or deleted until the modes are put back, and a directory cannot be listed before it is
+    chmodded, so this walks and chmods in the same pass rather than globbing first.
+
+    Directories alone: a file under a kept sandbox is already readable, and the mode of a
+    file the agent wrote is worth keeping as it is.
+
+    A path that is not there, and one this process does not own, are both left alone. This
+    never raises, because it is a step before an operation that reports its own failure.
+    """
+    stack = [Path(path)]
+    while stack:
+        current = stack.pop()
+        try:
+            current.chmod(0o700)
+            entries = list(current.iterdir())
+        except OSError:
+            continue
+        stack += [child for child in entries if child.is_dir() and not child.is_symlink()]
+
+
+def remove_tree(path: Path | str) -> None:
+    """Delete one tree under the log root. Every deletion of one goes through here.
+
+    It unseals first, so a kept harness sandbox is deletable. `shutil.rmtree` on its own
+    raises on the mode-000 trees such a sandbox carries, and a run directory holding one is
+    then never pruned. See [traces.py](traces.py).
+    """
+    unseal(path)
+    shutil.rmtree(path)
+
+
 # Pruning.
 
 
@@ -223,7 +266,7 @@ def prune(root: Path | str, days: int) -> list[Path]:
         stamp = _stamp(child)
         if stamp is None or stamp >= cutoff:
             continue
-        shutil.rmtree(child)
+        remove_tree(child)
         deleted.append(child)
     _repoint_latest(root)
     return deleted

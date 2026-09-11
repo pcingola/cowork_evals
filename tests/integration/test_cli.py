@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from cowork_evals import logs
+from cowork_evals import logs, traces
 from cowork_evals.cli import main
 from cowork_evals.docker import Condition, Docker, remedy
 from cowork_evals.docker.pytest_image import BUILD_REMEDY, PytestImage
@@ -117,6 +117,18 @@ def test_a_docker_run_writes_the_whole_log_layout_and_passes(credentialled, tmp_
     recorded = (run / logs.ENV_FILE).read_text()
     assert "backend: docker\n" in recorded
     assert f"image: {credentialled.tag}\n" in recorded
+
+    # The run's trace, collected out of a sandbox that only existed inside the container.
+    # Neither the redirected TMPDIR nor the collection can be reached without a real run.
+    kept = traces.run_dir(run / "smoke", "python-version", 1)
+    assert (kept / traces.TRACE_NAME).is_file(), f"no trace under {kept}"
+    assert (kept / traces.LAST_MESSAGE_NAME).read_text().strip() == "Python 3.10.12"
+    assert not traces.sandbox_root(run / "smoke").exists(), "the sandboxes are not left behind"
+
+    # And the document points at where the trace now is, not at a path inside the container.
+    trace_path = document["cases"][0]["arms"]["with"][0]["tracePath"]
+    assert Path(trace_path) == kept / traces.TRACE_NAME
+    assert Path(trace_path).is_file()
 
 
 # test.

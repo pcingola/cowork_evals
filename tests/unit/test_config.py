@@ -51,6 +51,7 @@ def test_missing_file_yields_the_eval_defaults(working_directory, tmp_path: Path
     assert section.allow_tools == ("Bash",)
     assert section.max_cost_usd == 5
     assert section.max_cost_total_usd == 25
+    assert section.keep_traces is True
 
 
 def test_missing_file_yields_the_docker_defaults(working_directory, tmp_path: Path) -> None:
@@ -221,3 +222,15 @@ def test_every_section_is_frozen() -> None:
     for section, key in ((config.cowork, "profile"), (config.eval, "model")):
         with pytest.raises((AttributeError, TypeError)):
             setattr(section, key, "Other")
+
+
+def test_the_traces_key_reads_a_boolean_and_refuses_anything_else(tmp_path: Path) -> None:
+    """It is the one `eval:` key that is a flag, and `keep_traces: "no"` is not false."""
+    written = tmp_path / "cowork_evals.yaml"
+    written.write_text("eval:\n  keep_traces: false\n", encoding="utf-8")
+    assert Config.load(written).eval.keep_traces is False
+
+    written.write_text("eval:\n  keep_traces: 'no'\n", encoding="utf-8")
+    with pytest.raises(CoWorkError) as raised:
+        Config.load(written)
+    assert "eval.keep_traces: expected true or false, got str" in str(raised.value)

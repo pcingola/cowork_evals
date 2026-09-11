@@ -15,6 +15,14 @@ hand-written result document under `tests/data/results/` and a recorded judge re
 `tests/data/judge/` are input on disk, not stand-ins. The reader, the graders, the validator,
 the gate and the vote counting that parse them are the real ones.
 
+A harness sandbox is written by the test rather than kept under `tests/data/`, because a
+sandbox is a directory tree with modes on it and a checkout does not carry a mode-000
+directory. `unit/test_traces.py` builds one in `tmp_path` in the layout
+[../docs/claude_code/plugin_eval_reference.md](../docs/claude_code/plugin_eval_reference.md)
+records, and a CoWork session directory beside it in the layout
+[../docs/cowork_desktop.md](../docs/cowork_desktop.md) records. The collector that reads
+either is the real one.
+
 ## Two tiers
 
 | Tier        | Lives in             | Selection        | Needs                                              | Cost                              |
@@ -55,6 +63,7 @@ A skipped test reports as a pass and hides the thing it was written to catch.
 | `unit/test_pytest_image.py`       | The test image digest, and the build and run argument lists | yes    |
 | `unit/test_validate.py`           | The case validator and the coverage report over hand-written trees | yes |
 | `unit/test_logs.py`               | The run directory, `env.txt`, `latest`, pruning and the tee | yes    |
+| `unit/test_traces.py`             | What is kept out of a run on either backend, over sandboxes and session directories written by the test | yes |
 | `unit/test_gate.py`               | The gate over hand-written result documents                | yes    |
 | `unit/test_preflight.py`          | Each backend's unmet conditions, and the rate ceiling      | yes    |
 | `unit/test_cli.py`                | The parser, the refusals, the verbs and the exit codes     | yes    |
@@ -131,7 +140,7 @@ backend-neutral and is proven on `--docker`, and the option mapping is proven wi
 `--dry-run --cowork` in the unit tier. Nothing there builds an image or logs in.
 
 Its one `live` test fires `plugins/smoke/` through `cowork_evals run --docker` and asserts
-the whole log layout over that same run, `run.log` included. That log line is the
+the whole log layout over that same run, `run.log` and the run's collected trace included. That log line is the
 descriptor-level tee proven against a real child process, and it cannot be reached without
 one. Its two `test` verb tests cost a container and no model call, so neither is `live`.
 
