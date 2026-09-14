@@ -558,8 +558,9 @@ logs/evals/<yyyymmdd-hhmmss>-<scope>/
   run.log                        # stdout and stderr of the whole invocation, tee'd live
   verdict.txt                    # the verdict
   env.txt                        # cowork_evals --version, claude --version, python3 -V,
-                                 #   the backend, the image on the container backend, and
-                                 #   the forwarded variable names, never a value
+                                 #   the backend, the image and the credential route on the
+                                 #   container backend, and the forwarded variable names,
+                                 #   never a value
   <plugin>/aggregate-result.json # the v1 result document
   <plugin>/report.html           # the self-contained HTML report
   <plugin>/debug.txt             # claude --debug-file output

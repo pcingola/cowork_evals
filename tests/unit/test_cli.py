@@ -193,6 +193,22 @@ def test_login_is_the_verb_a_missing_credential_names() -> None:
     assert "setup" not in remedy(Condition.CREDENTIAL)
 
 
+def test_login_refuses_under_the_bedrock_route(tmp_path: Path, capsys) -> None:
+    """That route reads Claude's own credential from the host, so there is nothing to make.
+
+    Both modes refuse, because `--check` under this route would report a credentials file
+    that route never writes. What reports the four host variables is `check --docker`.
+    """
+    path = tmp_path / "cowork_evals.yaml"
+    path.write_text("docker:\n  credential: bedrock\n", encoding="utf-8")
+    config = Config.load(path)
+    for args in (parse("login", "--docker"), parse("login", "--docker", "--check")):
+        assert cli._login(args, config) == PREFLIGHT_FAILED
+    printed = capsys.readouterr().err
+    assert printed.count("no login to make") == 2
+    assert "cowork_evals check --docker" in printed
+
+
 def test_check_takes_both_backends_and_all() -> None:
     assert parse("check", "--docker").backend == "docker"
     assert parse("check", "--cowork").backend == "cowork"

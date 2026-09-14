@@ -15,6 +15,7 @@ import pytest
 
 from cowork_evals.config import Config, DockerSection
 from cowork_evals.docker import (
+    BEDROCK_NAMES,
     CONTAINER_EXTRA_CA,
     CONTAINER_HOME,
     CONTAINER_LOGS,
@@ -465,6 +466,116 @@ def test_the_conditions_reach_the_whole_check(monkeypatch):
     monkeypatch.delenv(PROBE, raising=False)
     unmet = backend(env_passthrough=[PROBE]).check()
     assert Condition.ENVIRONMENT in [condition for condition, _ in unmet]
+
+
+# The two credential routes. docs/docker.md.
+#
+# `login` is the default and is what every test above ran under. These pin the other one,
+# and pin that exactly one route is read.
+
+BEDROCK_VALUE = "bedrock-probe-value-not-a-secret"
+
+
+def bedrock_host(monkeypatch, **overrides) -> None:
+    """Every Bedrock name set on this process, which is the host the backend reads."""
+    for name in BEDROCK_NAMES:
+        value = overrides.get(name, BEDROCK_VALUE)
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+            continue
+        monkeypatch.setenv(name, value)
+
+
+def test_the_default_route_is_the_login():
+    assert backend().credential == "login"
+    assert backend().uses_login is True
+    assert backend(credential="bedrock").uses_login is False
+
+
+def test_the_bedrock_route_forwards_every_name_with_its_value(monkeypatch):
+    bedrock_host(monkeypatch)
+    forwards = forwarded(backend(credential="bedrock").run_preamble())
+    for name in BEDROCK_NAMES:
+        assert f"{name}={BEDROCK_VALUE}" in forwards
+
+
+def test_the_login_route_forwards_no_bedrock_name(monkeypatch):
+    """The host may have all four and still be on the login route. The route decides."""
+    bedrock_host(monkeypatch)
+    forwards = forwarded(backend().run_preamble())
+    assert [name for name in BEDROCK_NAMES if any(name in value for value in forwards)] == []
+
+
+def test_the_redacted_bedrock_list_carries_the_names_and_reads_no_value(monkeypatch):
+    bedrock_host(monkeypatch)
+    argv = backend(credential="bedrock").run_preamble(redact=True)
+    for name in BEDROCK_NAMES:
+        assert f"{name}={REDACTED}" in forwarded(argv)
+    assert BEDROCK_VALUE not in " ".join(argv)
+
+
+def test_a_bedrock_name_the_host_does_not_set_stops_the_preamble(monkeypatch):
+    """The preflight refuses it first. This is the rule held where it would be broken."""
+    bedrock_host(monkeypatch, AWS_REGION=None)
+    with pytest.raises(DockerError) as raised:
+        backend(credential="bedrock").run_preamble()
+    assert "AWS_REGION" in str(raised.value)
+
+
+def test_an_empty_bedrock_name_stops_it_too(monkeypatch):
+    """An empty string is not a value, as for a forwarded name."""
+    bedrock_host(monkeypatch, AWS_BEARER_TOKEN_BEDROCK="")
+    with pytest.raises(DockerError) as raised:
+        backend(credential="bedrock").run_preamble()
+    assert "AWS_BEARER_TOKEN_BEDROCK" in str(raised.value)
+
+
+def test_the_login_is_mounted_on_one_route_and_on_neither_path_of_the_other(tmp_path):
+    assert backend(login_dir=tmp_path / "login").credential_argv() != []
+    assert backend(login_dir=tmp_path / "login", credential="bedrock").credential_argv() == []
+
+
+def test_the_preflight_reads_the_configured_route_and_never_both(monkeypatch, tmp_path):
+    bedrock_host(monkeypatch)
+    absent = tmp_path / "login"
+
+    on_login = backend(login_dir=absent).check_credential()
+    assert [condition for condition, _ in on_login] == [Condition.CREDENTIAL]
+
+    assert backend(login_dir=absent, credential="bedrock").check_credential() == []
+
+
+def test_each_unset_bedrock_name_is_one_condition_naming_it(monkeypatch, tmp_path):
+    bedrock_host(monkeypatch, AWS_REGION=None, ANTHROPIC_BEDROCK_BASE_URL=None)
+    unmet = backend(login_dir=tmp_path / "login", credential="bedrock").check_credential()
+    assert [condition for condition, _ in unmet] == [Condition.BEDROCK, Condition.BEDROCK]
+    assert "ANTHROPIC_BEDROCK_BASE_URL" in unmet[0][1]
+    assert "AWS_REGION" in unmet[1][1]
+
+
+def test_no_message_about_the_bedrock_route_carries_a_value(monkeypatch, tmp_path):
+    bedrock_host(monkeypatch, AWS_REGION="")
+    unmet = backend(login_dir=tmp_path / "login", credential="bedrock").check_credential()
+    assert BEDROCK_VALUE not in " ".join(message for _, message in unmet)
+
+
+def test_a_login_under_the_bedrock_route_raises_rather_than_opening_a_browser(tmp_path):
+    """`setup --docker` stops before this, and this is the rule held where it would break."""
+    with pytest.raises(DockerError) as raised:
+        backend(login_dir=tmp_path / "login", credential="bedrock").login()
+    assert "no login to make" in str(raised.value)
+
+
+def test_every_bedrock_name_is_refused_to_the_forwarding_list():
+    """One route for Claude's own credential, so the other list cannot carry its names."""
+    assert set(BEDROCK_NAMES) <= CREDENTIAL_NAMES
+
+
+def test_the_remedy_for_an_unset_bedrock_name_names_both_ways_out():
+    """`scripts/image.sh` drops this condition beside `CREDENTIAL`, so both exist."""
+    assert Condition.BEDROCK in Condition
+    assert "docker.credential: login" in remedy(Condition.BEDROCK)
+    assert "cowork_evals login --docker" in remedy(Condition.BEDROCK)
 
 
 def credential(docker, **oauth) -> None:

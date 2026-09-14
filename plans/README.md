@@ -16,8 +16,8 @@ while the work happens.
 
 ## Plans
 
-Eighteen plans. Sixteen build something and are numbered in build order, and one of those
-sixteen is skipped. `plan_fix` builds nothing, so it carries no number: it corrects what the
+Nineteen plans. Seventeen build something and are numbered in build order, and one of those
+seventeen is skipped. `plan_fix` builds nothing, so it carries no number: it corrects what the
 others wrote, and it ran before `plan_cowork_backend.md` because it changes what that plan and
 `plan_cli.md` both read. `plan_believable_results` carries no number for the same reason:
 it holds measurements and decisions, and its product is the four plans numbered 10 to 13. The order is the
@@ -47,6 +47,7 @@ not the system's: what is built and usable is
 | 14 | [`done/plan_panel.20260913.md`](done/plan_panel.20260913.md) | The per-case run history, the `panel` verb, and `prune --history` | implemented | `feat/panel` |
 | 15 | [`done/plan_consent.20260913.md`](done/plan_consent.20260913.md) | The keyboard consent dialog, shown by the driver rather than by a caller | implemented | `fix/consent` |
 | 16 | [`plan_artifact_checks.md`](plan_artifact_checks.md) | An assertion an author writes as code, deciding the run beside the harness's graders | written | `feat/artifact-checks` |
+| 17 | [`plan_eval_design.md`](plan_eval_design.md) | The document that owns which cases to write, the interview the skill runs, and a second credential route | written | `feat/eval-enhancement` |
 
 | Status        | Means                                                                     |
 | ------------- | --------------------------------------------------------------------------- |
@@ -128,6 +129,15 @@ assertion that does not fit one of them cannot be made and the case runs green h
 nothing. It adds a layer on top of `claude plugin eval`: the harness grades a run as it does
 now, and this layer then runs an author's own code over what the run produced and adds its
 assertions to the same result.
+
+Plan 17 builds no part of a run. A session pointed at a consumer repository invented its eval
+cases and graders, because no file said which cases a skill needs: the format contract covers
+the file and nothing covers the suite. It adds one shipped document, one section to one shipped
+skill, and the rule that separates the two documents. The boundary it moves is
+[`../docs/library.md`](../docs/library.md), and what it now says about coverage is
+[`../docs/eval_design.md`](../docs/eval_design.md). Its last phase is unrelated to the rest and
+is there because the same developer could run nothing without it: the container backend accepted
+one credential, and a host that authenticates Claude Code through Bedrock failed the preflight.
 
 Plans 2 and 3 each build one backend whole. Running an eval on those two backends is
 `claude plugin eval`, which discovers the cases, runs them, grades them and writes

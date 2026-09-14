@@ -77,7 +77,7 @@ rm -r .claude/skills/cowork-evals .claude/skills/cowork-ask && cowork_evals init
 
 | Backend                    | You need                                                       |
 | -------------------------- | ---------------------------------------------------------------- |
-| The container, `--docker`  | Docker or Rancher Desktop running, the images from `setup --docker`, and the one-time login from `login --docker` |
+| The container, `--docker`  | Docker or Rancher Desktop running, the images from `setup --docker`, and a credential: the one-time login from `login --docker`, or the Bedrock variables already on your host under `docker.credential: bedrock` |
 | CoWork, `--cowork`         | macOS, `claude` on `PATH`, CoWork signed in, the profile named in `cowork_evals.yaml`, and the macOS Accessibility grant |
 
 `cowork_evals check --all` reports what each backend is still missing, and names the command
@@ -169,6 +169,10 @@ match: not_contains
 
 Both are structural, so both decide the exit code. A grader file without the `---` delimiters
 is read as a note and is silently ignored.
+
+Two cases are not a suite. Which cases a skill needs, which grader answers which question, and
+what a case measures when it lacks the access it needs are
+[`docs/eval_design.md`](docs/eval_design.md).
 
 A grader can say that the agent created `totals.xlsx`. No grader type can say what is inside
 it, so the case passes on a spreadsheet holding the wrong numbers. A check is how you assert
@@ -294,15 +298,16 @@ your repository picks them up from there. They fire on different questions.
 
 | Skill          | Fires on                                                                   |
 | -------------- | ---------------------------------------------------------------------------- |
-| `cowork-evals` | Writing or fixing a case, a `prompt.md`, a grader or a check; a failing `cowork_evals` command; the configuration file; plugin code that has to run inside a session |
+| `cowork-evals` | Deciding which evals a skill needs; writing or fixing a case, a `prompt.md`, a grader or a check; a failing `cowork_evals` command; the configuration file; plugin code that has to run inside a session |
 | `cowork-ask`   | A question about what a live CoWork session actually does; a claim that has to be confirmed in the product; a failing `cowork_evals ask` |
 
-`cowork-evals` carries the case tree, the two required frontmatter keys, the six grader types,
-three copy-paste grader idioms, two copy-paste checks, the eleven authoring traps, the exit
-codes and the 3.10 runtime constraint. `cowork-ask` carries the verb, what one ask costs, and the rule that makes an
-answer evidence: ask the session to do the thing and read what it did, because what a session
-says about its own configuration is not evidence. Both send a reader to `cowork_evals docs`
-for everything they do not carry.
+`cowork-evals` carries the interview that decides which cases a skill needs and the ten
+coverage dimensions it checks the suite against, then the case tree, the two required
+frontmatter keys, the six grader types, three copy-paste grader idioms, two copy-paste checks,
+the eleven authoring traps, the exit codes and the 3.10 runtime constraint. `cowork-ask` carries
+the verb, what one ask costs, and the rule that makes an answer evidence: ask the session to do
+the thing and read what it did, because what a session says about its own configuration is not
+evidence. Both send a reader to `cowork_evals docs` for everything they do not carry.
 
 The files are yours once `init` writes them. Edit them, commit them, and refresh them after an
 upgrade with the two commands above. What they hold and why they are copies is
@@ -318,6 +323,7 @@ reads the same files without this repository checked out.
 | ------------------------------------------------ | ---------------------------------------------------- |
 | [`docs/cli.md`](docs/cli.md)                     | The whole command surface: verbs, options, exit codes |
 | [`docs/eval_format.md`](docs/eval_format.md)     | How to write a case: tree, frontmatter, graders    |
+| [`docs/eval_design.md`](docs/eval_design.md)     | Which cases to write, and which grader answers what |
 | [`docs/checks.md`](docs/checks.md)               | Assertions you write as Python, over the files a run produced |
 | [`docs/approaches.md`](docs/approaches.md)       | The two backends, and what each one proves         |
 | [`docs/running_evals.md`](docs/running_evals.md) | The run: what is built today, pass and fail, logs, cost |

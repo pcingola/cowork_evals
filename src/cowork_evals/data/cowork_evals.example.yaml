@@ -48,6 +48,11 @@ eval:
 docker:
   # platform: linux/arm64
   # claude_code_version: 2.1.265
+  # How Claude Code authenticates inside the run container. `login` is the claude.ai login
+  # this package makes with `setup --docker`. `bedrock` forwards the four Bedrock variables
+  # from the host and makes no login. docs/docker.md.
+  # credential: login
+  # Where the `login` route keeps that login. Read under `login` and under nothing else.
   # login_dir: ~/.cache/cowork_evals/claude
   # An extra root CA, for a host whose network inspects TLS. Unset, or naming a file that
   # is not there, passes nothing. The certificate never enters this repository.

@@ -29,7 +29,18 @@ LINK = re.compile(r"\]\(([^)]+)\)")
 
 # What a document name is checked against. Every document this repository holds is one of
 # these, and a new one that is neither is a new kind of file and not a silent addition.
-EXPECTED_DOCUMENTS = {"README", "cli", "eval_format", "library", "runtime", "approaches"}
+EXPECTED_DOCUMENTS = {
+    "README",
+    "cli",
+    "eval_format",
+    "eval_design",
+    "library",
+    "runtime",
+    "approaches",
+}
+
+# The grader types the format defines. Every file that names a grader names one of these.
+GRADER_TYPES = ("regex", "tool_used", "tool_order", "file_exists", "llm", "baseline")
 
 
 # The tree.
@@ -171,13 +182,66 @@ def _traps(text: str, start: str, end: str | None) -> list[str]:
     return [line for line in body.splitlines() if line.startswith("- ")]
 
 
+def _document(name: str) -> str:
+    root = resources.docs_dir()
+    assert root is not None
+    return (root / name).read_text()
+
+
+def _dimensions(design: str) -> list[str]:
+    """The first cell of every row in the design file's dimension table.
+
+    Derived from the document, so no dimension is spelled in this file: a dimension added
+    there is asserted here on the next run.
+    """
+    body = design[design.index("## The coverage dimensions") :]
+    body = body[: body.index("### What the table does not decide")]
+    cells = [line.split("|")[1].strip() for line in body.splitlines() if line.startswith("| ")]
+    return [cell for cell in cells if cell and cell != "Dimension" and set(cell) != {"-"}]
+
+
 def test_the_skill_carries_every_grader_type_the_format_defines() -> None:
     """The skill states no fact of its own, so a type in one is a type in the other."""
     skill = resources.skill("cowork-evals").read_text()
-    fmt = (resources.docs_dir() / "eval_format.md").read_text()
-    for grader in ("regex", "tool_used", "tool_order", "file_exists", "llm", "baseline"):
+    fmt = _document("eval_format.md")
+    for grader in GRADER_TYPES:
         assert f"`{grader}`" in skill, grader
         assert f"`{grader}`" in fmt, grader
+
+
+def test_the_design_names_every_grader_type_the_format_defines() -> None:
+    """The design file places every type in a dimension. A seventh type has to land somewhere."""
+    design = _document("eval_design.md")
+    for grader in GRADER_TYPES:
+        assert f"`{grader}`" in design, grader
+
+
+def test_the_skill_carries_every_coverage_dimension_the_design_defines() -> None:
+    """A dimension the document names and the skill does not is a dimension no session reads."""
+    skill = resources.skill("cowork-evals").read_text()
+    dimensions = _dimensions(_document("eval_design.md"))
+    assert dimensions
+    for dimension in dimensions:
+        assert dimension in skill, dimension
+
+
+def test_the_skill_carries_the_interview_default() -> None:
+    """The default and its one exception. Without both, a session invents a suite again."""
+    skill = resources.skill("cowork-evals").read_text()
+    design = _document("eval_design.md")
+    for sentence in ("Claude Code does not invent a suite.", "The signal is the reply."):
+        assert sentence in skill, sentence
+        assert sentence in design, sentence
+
+
+def test_the_grader_class_preference_is_in_the_design_file() -> None:
+    """The split: which class to prefer depends on the skill, so the format does not say.
+
+    docs/README.md holds the question that decides the side. This pins the one statement that
+    moved, so a later edit cannot quietly put it back.
+    """
+    assert "Prefer a" not in _document("eval_format.md")
+    assert "Prefer a structural grader." in _document("eval_design.md")
 
 
 def test_the_skill_carries_as_many_traps_as_the_format() -> None:
@@ -193,7 +257,7 @@ def test_the_skill_sends_the_reader_to_the_docs_verb() -> None:
     """Everything it does not carry is one command away, and it has to say which."""
     skill = resources.skill("cowork-evals").read_text()
     assert "cowork_evals docs" in skill
-    for name in ("eval_format", "cli", "runtime"):
+    for name in ("eval_format", "eval_design", "cli", "runtime"):
         assert f"docs {name}" in skill, name
 
 

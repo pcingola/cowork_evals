@@ -74,6 +74,7 @@ def test_missing_file_yields_the_docker_defaults(working_directory, tmp_path: Pa
         section = Config.load().docker
     assert section.platform == "linux/arm64"
     assert section.claude_code_version == "2.1.265"
+    assert section.credential == "login"
     assert section.login_dir == Path.home() / ".cache" / "cowork_evals" / "claude"
     assert section.extra_ca_file is None
     assert section.env_passthrough == ()
@@ -193,6 +194,7 @@ def test_an_unknown_key_inside_a_known_section_raises(tmp_path: Path, body: str,
         ("eval:\n  max_cost_usd: five\n", "eval.max_cost_usd"),
         ("eval:\n  allow_tools: Bash Write\n", "eval.allow_tools"),
         ("docker:\n  platform: 3\n", "docker.platform"),
+        ("docker:\n  credential: 3\n", "docker.credential"),
         ("docker:\n  env_passthrough: ACME_KEY\n", "docker.env_passthrough"),
         ("docker:\n  env_passthrough: [3]\n", "docker.env_passthrough"),
     ],
@@ -296,6 +298,19 @@ def test_the_ablation_key_reads_one_of_two_words_and_refuses_anything_else(
     with pytest.raises(CoWorkError) as raised:
         Config.load(write(tmp_path, "eval:\n  ablation: with-only\n"))
     assert "eval.ablation: expected one of none, with-without" in str(raised.value)
+
+
+def test_the_credential_key_reads_one_of_two_routes_and_refuses_anything_else(
+    tmp_path: Path,
+) -> None:
+    """A third route names no credential, and the preflight would have nothing to check.
+    docs/docker.md."""
+    file = write(tmp_path, "docker:\n  credential: bedrock\n")
+    assert Config.load(file).docker.credential == "bedrock"
+
+    with pytest.raises(CoWorkError) as raised:
+        Config.load(write(tmp_path, "docker:\n  credential: api-key\n"))
+    assert "docker.credential: expected one of login, bedrock" in str(raised.value)
 
 
 def test_the_delta_threshold_reads_a_number_from_zero_to_one(tmp_path: Path) -> None:

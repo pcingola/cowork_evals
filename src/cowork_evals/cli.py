@@ -742,6 +742,7 @@ def _sweep(
             directory,
             args.backend,
             image=None if image is None else image.tag,
+            credential=None if image is None else image.credential,
             env_passthrough=() if image is None else image.env_passthrough,
         )
         swept = _each_plugin(args, config, directory, targets, tags, image)
@@ -1079,11 +1080,24 @@ def _login(args: argparse.Namespace, config: Config) -> int:
     they are the two this reads from `Docker.check`: the credential is what it is about to
     make, and `docker.env_passthrough` reaches a run and not this container.
 
+    There is no login under `docker.credential: bedrock`. That route reads Claude's own
+    credential from the host, so this verb has nothing to make, in either mode, and
+    `check --docker` is what reports a name it is missing. docs/docker.md.
+
     There is no headless login. The CLI opens a browser and reads a code back in its own
     prompt, so a stdin that is not a terminal is refused here rather than left to `docker
     run -it`, whose message says nothing about what the operator has to do.
     """
     image = Docker(config)
+    if not image.uses_login:
+        return _refuse(
+            [
+                f"docker.credential is {image.credential}, so there is no login to make: "
+                "the host variables are the credential, and cowork_evals check --docker "
+                "reports one that is unset"
+            ],
+            PREFLIGHT_FAILED,
+        )
     if args.check:
         if image.has_credential():
             print(f"{image.credentials_file}: current")

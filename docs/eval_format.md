@@ -9,8 +9,10 @@ frontmatter keys, the grader types, what the validator refuses and the traps tha
 silently. The format is `claude plugin eval`'s own, so a case needs no adapter to run under
 that harness.
 
-What the CLI does with a case is [plugin_eval.md](plugin_eval.md). How this repository invokes
-it is [running_evals.md](running_evals.md). Which backend honours which field is
+Which cases a skill needs, and which grader answers which question, is
+[eval_design.md](eval_design.md). What the CLI does with a case is
+[plugin_eval.md](plugin_eval.md). How this repository invokes it is
+[running_evals.md](running_evals.md). Which backend honours which field is
 [approaches.md](approaches.md). The full field-by-field reference is vendored at
 [claude_code/plugin_eval_reference.md](claude_code/plugin_eval_reference.md), and it is the
 authority where this file is silent.
@@ -203,9 +205,6 @@ under `--ablation with-without`, which is off by default and is the container ba
 alone, so a case that never asks for the baseline arm sets it only to stay portable. See
 [running_evals.md](running_evals.md).
 
-Prefer a deterministic grader over a judged one for anything long. Judges are noisy on long
-inputs.
-
 The skill-fired idiom:
 
 ```yaml
@@ -264,7 +263,8 @@ sibling case blocks a single-case run. There is no option to skip it. See
 
 A skill under `<plugin>/skills/` with no directory of that name under `evals/` is reported and
 is not a violation. Coverage is not a rule of this format, so it fails nothing on its own.
-`cowork_evals run --require-coverage` is what turns a report into a preflight failure.
+`cowork_evals run --require-coverage` is what turns a report into a preflight failure. What a
+covered skill needs beyond one directory is [eval_design.md](eval_design.md).
 
 ## Authoring traps
 

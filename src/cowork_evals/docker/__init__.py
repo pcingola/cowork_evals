@@ -20,7 +20,7 @@ from pathlib import Path
 
 from ..cases import CaseError
 from ..cases import plugin_root as cases_plugin_root
-from ..config import Config
+from ..config import CREDENTIAL_BEDROCK, CREDENTIAL_LOGIN, Config
 from ..harness import ENABLEMENT_ENV, RESULT_NAME, RunOptions, eval_argv
 from ..traces import SANDBOX_DIR, sandbox_root
 
@@ -63,13 +63,24 @@ CONTAINER_TMPDIR = f"{CONTAINER_LOGS}/{SANDBOX_DIR}"
 EXTRA_CA_SECRET = "extra_ca"
 CONTAINER_EXTRA_CA = "/usr/local/share/ca-certificates/extra_ca.crt"
 
+# What the `bedrock` route forwards, in this order, and the only place these names are
+# spelled. Each one is Claude Code's own, so the route reads them from the host and no case
+# and no skill sees them as configuration. docs/docker.md.
+BEDROCK_NAMES = (
+    "CLAUDE_CODE_USE_BEDROCK",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "AWS_REGION",
+)
+
 # The names `docker.env_passthrough` may never carry. Each one is how Claude Code takes
-# Claude's own credential, and the container login is the one route for that. docs/docker.md.
+# Claude's own credential, and `docker.credential` is the one route for that. docs/docker.md.
 CREDENTIAL_NAMES = frozenset(
     {
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
         "CLAUDE_CODE_OAUTH_TOKEN",
+        *BEDROCK_NAMES,
     }
 )
 
@@ -89,6 +100,7 @@ class Condition(Enum):
     DAEMON = "daemon"
     IMAGE = "image"
     CREDENTIAL = "credential"
+    BEDROCK = "bedrock"
     ENVIRONMENT = "environment"
     ENV_CREDENTIAL = "env_credential"
 
@@ -108,12 +120,17 @@ def remedy(condition: Condition) -> str:
             return "run cowork_evals setup --docker"
         case Condition.CREDENTIAL:
             return "run cowork_evals login --docker"
+        case Condition.BEDROCK:
+            return (
+                "set it on this host, or set docker.credential: login and run "
+                "cowork_evals login --docker"
+            )
         case Condition.ENVIRONMENT:
             return "set it on this host, or drop it from docker.env_passthrough"
         case Condition.ENV_CREDENTIAL:
             return (
-                "drop it from docker.env_passthrough: the container login is the one "
-                "credential route, and cowork_evals login --docker makes it"
+                "drop it from docker.env_passthrough: docker.credential is the one route "
+                "for Claude's own credential, and cowork_evals login --docker makes it"
             )
 
 
@@ -211,6 +228,7 @@ class Docker:
         settings = self._config.docker
         self.platform = settings.platform
         self.claude_code_version = settings.claude_code_version
+        self.credential = settings.credential
         self.login_dir = settings.login_dir
         self.extra_ca_file: Path | None = (
             settings.extra_ca_file
@@ -219,6 +237,15 @@ class Docker:
         )
         self.env_passthrough = settings.env_passthrough
         self._environment: dict[str, str | None] | None = None
+
+    @property
+    def uses_login(self) -> bool:
+        """Whether Claude Code in the container takes the login this package owns.
+
+        The one place either route is decided. `False` is the `bedrock` route, which reads
+        four host variables instead and mounts nothing. docs/docker.md.
+        """
+        return self.credential == CREDENTIAL_LOGIN
 
     # The login this package owns. Both paths are mounted read-write, because the CLI
     # refreshes its token and rewrites its state file on every start.
@@ -359,8 +386,35 @@ class Docker:
             "systempaths=unconfined",
             *self.extra_ca_env_argv(),
             *self.env_passthrough_argv(redact=redact),
+            *self.credential_env_argv(redact=redact),
             *self.credential_argv(),
         ]
+
+    def credential_env_argv(self, *, redact: bool = False) -> list[str]:
+        """`--env NAME=VALUE` for Claude's own credential, under the `bedrock` route.
+
+        Empty under `login`, which mounts a credentials file instead and forwards nothing.
+
+        Separate from `env_passthrough_argv` because the two answer different questions:
+        that one is a credential the skill under test reads, and this one is how Claude Code
+        itself authenticates. `CREDENTIAL_NAMES` keeps a name out of the other list.
+        docs/docker.md.
+        """
+        if self.uses_login:
+            return []
+        argv: list[str] = []
+        for name in BEDROCK_NAMES:
+            if redact:
+                argv += ["--env", f"{name}={REDACTED}"]
+                continue
+            value = os.environ.get(name)
+            if not value:
+                raise DockerError(
+                    f"docker.credential is {CREDENTIAL_BEDROCK} and {name} is unset or empty "
+                    f"on this host: {remedy(Condition.BEDROCK)}"
+                )
+            argv += ["--env", f"{name}={value}"]
+        return argv
 
     def env_passthrough_argv(self, *, redact: bool = False) -> list[str]:
         """`--env NAME=VALUE` for each name in `docker.env_passthrough`, in order.
@@ -422,11 +476,14 @@ class Docker:
         ]
 
     def credential_argv(self) -> list[str]:
-        """The one credential route: the login this package owns, mounted. docs/docker.md.
+        """The `login` route: the login this package owns, mounted. docs/docker.md.
 
         Read-write, because the CLI refreshes its token and rewrites its state file on
-        every start.
+        every start. Empty under `bedrock`, which forwards variables and mounts neither
+        path, so nothing under `login_dir` has to exist for that route.
         """
+        if not self.uses_login:
+            return []
         return [
             "-v",
             f"{self.claude_dir}:{CONTAINER_HOME}/{CLAUDE_DIR_NAME}:rw",
@@ -458,7 +515,15 @@ class Docker:
 
         The terminal is inherited, so the CLI opens the browser and takes the code in its
         own prompt. Whoever calls this owns a terminal: there is no headless login.
+
+        It raises under the `bedrock` route rather than opening a browser for a credential
+        that route never reads.
         """
+        if not self.uses_login:
+            raise DockerError(
+                f"docker.credential is {CREDENTIAL_BEDROCK}, so there is no login to make: "
+                f"the four host variables are the credential"
+            )
         self.seed_login_dir()
         completed = subprocess.run(self.login_argv())
         if completed.returncode != 0:
@@ -581,10 +646,29 @@ class Docker:
             unmet.append(
                 (Condition.IMAGE, f"image {self.tag} is absent: {remedy(Condition.IMAGE)}")
             )
-        if not self.has_credential():
-            unmet.append((Condition.CREDENTIAL, f"no credential: {remedy(Condition.CREDENTIAL)}"))
+        unmet += self.check_credential()
         unmet += self.check_environment()
         return unmet
+
+    def check_credential(self) -> list[tuple[Condition, str]]:
+        """Whether Claude Code in the container has a credential, on the configured route.
+
+        One route is checked, never both: a host on `bedrock` has no login and is ready, and
+        a host on `login` is not asked for four variables it does not have. docs/docker.md.
+        """
+        if self.uses_login:
+            if self.has_credential():
+                return []
+            return [(Condition.CREDENTIAL, f"no credential: {remedy(Condition.CREDENTIAL)}")]
+        return [
+            (
+                Condition.BEDROCK,
+                f"docker.credential is {CREDENTIAL_BEDROCK} and {name} is unset or empty on "
+                f"this host: {remedy(Condition.BEDROCK)}",
+            )
+            for name in BEDROCK_NAMES
+            if not os.environ.get(name)
+        ]
 
     def check_environment(self) -> list[tuple[Condition, str]]:
         """One line per forwarded name that cannot be forwarded, and never a value.

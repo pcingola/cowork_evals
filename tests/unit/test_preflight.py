@@ -206,3 +206,25 @@ def test_the_forwarded_names_are_the_container_backends_alone(tmp_path: Path, mo
     monkeypatch.delenv(PROBE, raising=False)
     config = configured(tmp_path, FORWARDS + "cowork:\n  profile: /nowhere-at-all\n")
     assert not [line for line in preflight.checks(preflight.COWORK, config) if PROBE in line]
+
+
+# The credential route, through the same dispatch. docs/docker.md.
+
+BEDROCK = "docker:\n  credential: bedrock\n"
+
+
+def test_an_unset_bedrock_name_is_an_unmet_docker_condition(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("AWS_BEARER_TOKEN_BEDROCK", raising=False)
+    lines = preflight.checks(preflight.DOCKER, configured(tmp_path, BEDROCK))
+    assert [
+        line for line in lines if "AWS_BEARER_TOKEN_BEDROCK" in line and "unset or empty" in line
+    ]
+
+
+def test_the_bedrock_route_asks_for_no_login(tmp_path: Path, monkeypatch) -> None:
+    """The login condition is the other route's, and exactly one route is checked."""
+    for name in ("CLAUDE_CODE_USE_BEDROCK", "AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"):
+        monkeypatch.setenv(name, "probe-value-not-a-secret")
+    monkeypatch.setenv("ANTHROPIC_BEDROCK_BASE_URL", "https://example.invalid")
+    lines = preflight.checks(preflight.DOCKER, configured(tmp_path, BEDROCK))
+    assert not [line for line in lines if "no credential" in line]

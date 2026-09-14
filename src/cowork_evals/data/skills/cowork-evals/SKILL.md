@@ -1,6 +1,6 @@
 ---
 name: cowork-evals
-description: Write and run evals for Claude CoWork skills and plugins with the cowork_evals command, and run a plugin's own pytest suite on the CoWork runtime. TRIGGER when writing or fixing an eval case, a prompt.md, a grader or a check under an evals/ directory, when a cowork_evals command fails, when configuring cowork_evals.yaml, or when writing plugin code that has to run inside a CoWork session.
+description: Decide which evals a Claude CoWork skill or plugin needs, write them, and run them with the cowork_evals command, and run a plugin's own pytest suite on the CoWork runtime. TRIGGER when a skill or plugin needs evals and has none, when asked what to evaluate or which grader to use, when writing or fixing an eval case, a prompt.md, a grader or a check under an evals/ directory, when a cowork_evals command fails, when configuring cowork_evals.yaml, or when writing plugin code that has to run inside a CoWork session.
 ---
 
 # cowork_evals
@@ -15,6 +15,7 @@ file is the authority for anything below.
 
 | Question                                | Read                     |
 | --------------------------------------- | ------------------------ |
+| Which cases to write, and which grader answers what | `docs eval_design`   |
 | How to write a case, field by field     | `docs eval_format`       |
 | Every verb, option and exit code        | `docs cli`               |
 | Which backend proves what, and its cost | `docs approaches`        |
@@ -24,6 +25,68 @@ file is the authority for anything below.
 | An assertion no grader type can express | `docs checks`            |
 | Every grader field the format is silent on | `docs claude_code/plugin_eval_reference` |
 | What `panel` shows, and the records behind it | `docs panel`           |
+
+## What to evaluate
+
+`docs eval_design` owns this. The short form:
+
+Claude Code does not invent a suite. Ask the developer what the skill has to get right, what a
+bad answer looks like, and what a release must not ship. Read the cases and the graders out of
+the reply, and ask a follow-up question when the reply does not decide one. Never ask which eval
+and which grader they want: that hands the design back to the developer, and a developer who
+could answer it would have written the case already.
+
+A reply names a symptom, not a case, and turning it into one is the work. `The summaries are too
+long` is a `regex` over `last_message`. `It makes things up about our schema` is a fixture and a
+`not_contains` pattern per invented value. `It ignores the config file` is a `tool_used` with an
+`input_match` naming that file.
+
+A reply that says the developer does not know, or that asks Claude Code to decide, is the
+authorization to design the suite alone. The signal is the reply. No option and no configuration
+key selects it. Then say which dimensions were covered, which were left out, and why each
+left-out one does not apply.
+
+Whichever route produced the suite, check it against these. Each dimension that applies has at
+least one case, and one case may answer more than one row.
+
+| Dimension                                | The grader                                                                  | Applies when                                  |
+| ---------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------- |
+| Expected behaviour, end to end           | `file_exists` on the artefact, `tool_order` on the steps that have an order, `llm` over `{source: file, path}` | always                    |
+| The right tools are used                 | the skill-fired `tool_used` below, `tool_order` for a required sequence, `min: 0, max: 0` for a tool it must not call and for a request it must not fire on | always |
+| The goal is achieved                     | `file_exists`, `regex` over `{source: file, path}` for a value that has to be in it, `llm` when the outcome is prose | always                |
+| Each capability on its own               | `tool_used` with that capability's `input_match`, `regex` over its output    | the skill names more than one capability      |
+| The instructions are followed            | `regex` over `last_message` with `contains`, `not_contains` or `count:N`, and `m` in `flags` when the anchor is per line | the instructions constrain the output |
+| Edge cases                               | `regex` for the stated refusal or the handled result, `min: 0, max: 0` for the destructive action | the input has a boundary: empty, absent, malformed, oversized, conflicting |
+| Hallucination                            | `regex` with `not_contains` per value the fixture does not carry, `baseline` against a `baseline_file` | the skill reports what it read       |
+| Context relevancy                        | `tool_used` with `input_match` naming the file it had to open, `regex` over `trace` for that path | the skill chooses what to read     |
+| Answer relevancy                         | `regex` with `count:N` or `not_contains` for the padding shape, `llm`, `baseline` | the product is the message and not a file |
+| PII and confidential information leakage | `regex` with `not_contains` over `last_message`, over each artefact, over `trace`, and over `mock_calls` | the skill reads anything the prompt did not carry |
+
+Prefer a structural grader. A judged grader over a non-deterministic agent is a flaky verdict,
+and a judge is noisy on a long input. A dimension whose only grader is `llm` or `baseline` is
+printed and leaves the exit code silent about it.
+
+Context relevancy, leakage and the malformed form of edge cases each need a staged fixture, which
+is a `context.*` key, which makes the case `no-cowork`. The leakage marker is a fixture the case
+owns, never a forwarded credential: `run.log` carries whatever the container printed.
+
+A case that needs access it does not have measures the access and not the skill.
+
+| The case needs               | The route                                                                       |
+| ---------------------------- | ------------------------------------------------------------------------------- |
+| A credential the skill reads | `docker.env_passthrough` names the variable, and a name unset or empty exits 3   |
+| A third-party service        | a fixture the case stages, or a `mocks/` stand-in                               |
+| An MCP server                | `evals/mocks/<server>/<tool>.md`, which makes the case `no-cowork` and `mock_calls` readable |
+| A tool                       | `eval.allow_tools`, or the case's own `allowed_tools`, which makes it `no-cowork` |
+| A file staged before the run | `context.add_dirs` or `context.scaffold_script`, which makes the case `no-cowork` |
+| A wheel the skill imports    | `cowork_evals test`, before an eval is written over the import error             |
+
+Design around the access that exists. When the developer proposes a case that needs access that
+is not there, say so before writing the case, and name the route that would supply it.
+
+Propose the suite before writing a file: one line per case, naming the dimension it covers, the
+grader that decides it, the access it needs, and whether it carries `no-cowork`. A developer
+strikes a case in one sentence there, and pays for a rewrite after the files exist.
 
 ## The command
 
@@ -127,7 +190,7 @@ not one.
 
 One grader per file under `graders/`, frontmatter then the rubric or pattern. Structural
 graders are deterministic and decide the exit code. Judged graders call a model and are
-printed. Prefer a structural one.
+printed.
 
 | Type          | Takes                                                                     | Class      |
 | ------------- | ------------------------------------------------------------------------- | ---------- |

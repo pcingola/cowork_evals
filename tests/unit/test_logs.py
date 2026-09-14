@@ -133,9 +133,23 @@ def test_out_replaces_the_whole_root(tmp_path: Path) -> None:
 
 
 def test_env_txt_carries_one_line_per_row(tmp_path: Path) -> None:
-    written = logs.write_env(tmp_path, "docker", image="cowork-evals:0123456789ab")
+    written = logs.write_env(
+        tmp_path, "docker", image="cowork-evals:0123456789ab", credential="login"
+    )
     names = [line.split(":", 1)[0] for line in written.read_text().splitlines()]
-    assert names == ["cowork_evals", "claude", "python3", "backend", "image"]
+    assert names == ["cowork_evals", "claude", "python3", "backend", "image", "credential"]
+
+
+def test_the_credential_line_is_the_route_and_no_name(tmp_path: Path) -> None:
+    """The route says which credential a run used. The names it forwards are fixed.
+    docs/docker.md."""
+    written = logs.write_env(tmp_path, "docker", credential="bedrock").read_text()
+    assert "credential: bedrock\n" in written
+    assert "AWS_BEARER_TOKEN_BEDROCK" not in written
+
+
+def test_the_credential_line_is_absent_without_a_route(tmp_path: Path) -> None:
+    assert "credential" not in logs.write_env(tmp_path, "cowork").read_text()
 
 
 def test_the_image_line_is_absent_without_one(tmp_path: Path) -> None:

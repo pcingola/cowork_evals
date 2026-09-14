@@ -54,6 +54,14 @@ CONSENT_DIALOG = "dialog"
 CONSENT_NONE = "none"
 CONSENT_CHOICES = (CONSENT_DIALOG, CONSENT_NONE)
 
+# What `docker.credential` may be, and it decides how the run container authenticates Claude
+# Code. `login` mounts the claude.ai login this package owns; `bedrock` forwards the variables
+# a Bedrock host already has and mounts nothing. They live here rather than in `docker/` for
+# the reason above: the converter below reads them. docs/docker.md.
+CREDENTIAL_LOGIN = "login"
+CREDENTIAL_BEDROCK = "bedrock"
+CREDENTIAL_CHOICES = (CREDENTIAL_LOGIN, CREDENTIAL_BEDROCK)
+
 
 class CoWorkError(Exception):
     """A driver failure, carrying its taxonomy code from docs/cowork_driver.md."""
@@ -125,6 +133,14 @@ def _fraction(name: str, value: Any) -> int | float:
 def _ablation(name: str, value: Any) -> str:
     if _text(name, value) not in ABLATION_CHOICES:
         raise CoWorkError(2, f"{name}: expected one of {', '.join(ABLATION_CHOICES)}, got {value}")
+    return value
+
+
+def _credential(name: str, value: Any) -> str:
+    if _text(name, value) not in CREDENTIAL_CHOICES:
+        raise CoWorkError(
+            2, f"{name}: expected one of {', '.join(CREDENTIAL_CHOICES)}, got {value}"
+        )
     return value
 
 
@@ -305,15 +321,20 @@ class DockerSection:
 
     platform: str = "linux/arm64"
     claude_code_version: str = "2.1.265"
+    # How the run container authenticates Claude Code itself. `login` is the default, and
+    # `login_dir` is read only under it. docs/docker.md.
+    credential: str = CREDENTIAL_LOGIN
     login_dir: Path = Path("~/.cache/cowork_evals/claude")
     extra_ca_file: Path | None = None
-    # The one route from the process environment into a run. Empty by default, so a
-    # repository that names none is unaffected. docs/docker.md.
+    # The one route from the process environment into a run, for a credential the skill under
+    # test reads. Empty by default, so a repository that names none is unaffected. It is not
+    # the route for Claude's own credential, which is `credential` above. docs/docker.md.
     env_passthrough: tuple[str, ...] = ()
 
     _FIELDS: ClassVar[dict[str, Callable[[str, Any], Any]]] = {
         "platform": _text,
         "claude_code_version": _text,
+        "credential": _credential,
         "login_dir": _path,
         "extra_ca_file": _optional_path,
         "env_passthrough": _env_names,

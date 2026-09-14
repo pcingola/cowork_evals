@@ -155,6 +155,7 @@ def write_env(
     run_directory: Path | str,
     backend: str,
     image: str | None = None,
+    credential: str | None = None,
     env_passthrough: Sequence[str] = (),
 ) -> Path:
     """`env.txt`: one `name: value` line per row, in a fixed order.
@@ -162,6 +163,11 @@ def write_env(
     A command that does not run records the failure on its own line rather than raising: a
     log that says why a version is unknown is worth more than an invocation that stops for
     it. `image` is the container backend's, and is absent on every other.
+
+    `credential` is the container backend's route, `docker.credential`. Two runs of the same
+    image on the same host authenticated Claude Code differently under the two routes, and
+    the route name is what says which. The route and never a name it forwards: the names
+    each route owns are fixed and are in docs/docker.md.
 
     `env_passthrough` is the container backend's too, and is the names the run forwarded into
     the container. The names and never a value: what each one held is the host's, and it
@@ -175,6 +181,8 @@ def write_env(
     ]
     if image is not None:
         rows.append(("image", image))
+    if credential is not None:
+        rows.append(("credential", credential))
     if env_passthrough:
         rows.append(("env_passthrough", " ".join(env_passthrough)))
     path = Path(run_directory) / ENV_FILE

@@ -36,9 +36,9 @@ SDIST="$(echo dist/*.tar.gz)"
 WHEEL_FILES="$(unzip -Z1 "$WHEEL")"
 SDIST_FILES="$(tar tzf "$SDIST")"
 
-# What ships beside the modules. docs/library.md holds the table. The two documents named
-# here are the ones a consumer cannot work without: the authoring contract, and the vendored
-# field reference it defers to.
+# What ships beside the modules. docs/library.md holds the table. The three documents named
+# here are the ones a consumer cannot work without: the authoring contract, the design contract
+# over it, and the vendored field reference both defer to.
 for member in \
   cowork_evals/data/requirements.txt \
   cowork_evals/data/requirements_installable.txt \
@@ -49,6 +49,7 @@ for member in \
   cowork_evals/docker/Dockerfile \
   cowork_evals/docker/Dockerfile.pytest \
   cowork_evals/docs/eval_format.md \
+  cowork_evals/docs/eval_design.md \
   cowork_evals/docs/claude_code/plugin_eval_reference.md; do
   grep -qx "$member" <<< "$WHEEL_FILES" || die "$member is missing from the wheel"
 done
