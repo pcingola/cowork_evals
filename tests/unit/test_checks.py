@@ -498,7 +498,8 @@ def test_a_declared_case_produces_no_check_result(tmp_path: Path) -> None:
     assert document["cases"][0]["arms"]["with"] == []
 
 
-def test_only_the_with_arm_is_walked(tmp_path: Path) -> None:
+def test_every_arm_is_walked(tmp_path: Path) -> None:
+    """The baseline arm's runs are collected like any other, so the checks reach them too."""
     directory = tmp_path / "smoke"
     directory.mkdir(parents=True)
     runs = collected_runs(directory, "checked", 1)
@@ -511,8 +512,8 @@ def test_only_the_with_arm_is_walked(tmp_path: Path) -> None:
     assert checks.run(directory, PLUGIN, judge_model="haiku") == []
     document = rerun(directory)
     assert len(one(document)["graders"]) == 5
-    assert len(document["cases"][0]["arms"]["without"][0]["graders"]) == 1
-    assert not (directory / "traces" / "checked-without" / "run-1" / checks.CHECKS_FILE).exists()
+    assert len(document["cases"][0]["arms"]["without"][0]["graders"]) == 5
+    assert (directory / "traces" / "checked-without" / "run-1" / checks.CHECKS_FILE).is_file()
 
 
 def test_a_document_that_cannot_be_read_is_silent(tmp_path: Path) -> None:
