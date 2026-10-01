@@ -1,6 +1,6 @@
 ---
 name: cowork-evals
-description: Write and run evals for Claude CoWork skills and plugins with the cowork_evals command, and run a plugin's own pytest suite on the CoWork runtime. TRIGGER when writing or fixing an eval case, a prompt.md, a grader or a check under an evals/ directory, when a cowork_evals command fails, when configuring cowork_evals.yaml, or when writing plugin code that has to run inside a CoWork session.
+description: "Decides which evals a Claude CoWork skill needs, writes them, reviews the ones it has, and runs them. TRIGGER when: a skill needs evals, asked to review or audit the evals it has, writing or fixing a case, a grader or a check, or a cowork_evals command fails. NOT for authoring the skill itself, which is cowork-skill-author."
 ---
 
 # cowork_evals
@@ -15,6 +15,7 @@ file is the authority for anything below.
 
 | Question                                | Read                     |
 | --------------------------------------- | ------------------------ |
+| Which cases to write, and which assertion answers what | `docs eval_design`   |
 | How to write a case, field by field     | `docs eval_format`       |
 | Every verb, option and exit code        | `docs cli`               |
 | Which backend proves what, and its cost | `docs approaches`        |
@@ -24,6 +25,17 @@ file is the authority for anything below.
 | An assertion no grader type can express | `docs checks`            |
 | Every grader field the format is silent on | `docs claude_code/plugin_eval_reference` |
 | What `panel` shows, and the records behind it | `docs panel`           |
+
+## What to evaluate
+
+**Reading `docs eval_design` is mandatory, not optional.** Open that file and read it before
+designing a suite, before adding a case to one, before running a suite, and before reporting what a
+run produced. Answering any of those from this file is wrong, and a suite designed without that
+document is a guess whatever it scores.
+
+It covers drafting a suite from the skill, the dimensions a suite is checked against, proposing the
+draft to the developer, writing cases that show what the skill adds over the model alone, the three
+assertions every case carries, testing an assertion before a run, and reading the results of a run.
 
 ## The command
 
@@ -127,7 +139,7 @@ not one.
 
 One grader per file under `graders/`, frontmatter then the rubric or pattern. Structural
 graders are deterministic and decide the exit code. Judged graders call a model and are
-printed. Prefer a structural one.
+printed.
 
 | Type          | Takes                                                                     | Class      |
 | ------------- | ------------------------------------------------------------------------- | ---------- |
