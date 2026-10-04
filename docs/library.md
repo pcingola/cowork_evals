@@ -74,6 +74,7 @@ own.
 | `docs/`                                           | yes   | Every document in this tree, at `cowork_evals/docs/` in the wheel        |
 | `scripts/`                                        | no    | Development tasks for this repository only                               |
 | `tests/`, `plugins/`, `plans/`                    | no    | Development material                                                     |
+| `assets/`                                         | no    | The images `README.md` shows                                             |
 
 Each module under `src/cowork_evals/` states in its own docstring what it holds. A consumer
 never sees `scripts/`: those are the tasks that build this repository's environments, run its
