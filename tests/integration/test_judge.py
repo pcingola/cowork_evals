@@ -13,12 +13,12 @@ from __future__ import annotations
 import struct
 import zlib
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from cowork_evals.cases import Grader, LlmGraderConfig
 from cowork_evals.checks import build_run
+from cowork_evals.cowork import SessionDocument
 from cowork_evals.judge import grade, resolve_model
 
 RUBRIC = "PASS if the material is exactly the word PONG. FAIL for anything else."
@@ -35,9 +35,26 @@ def rubric_grader() -> Grader:
     )
 
 
-def answering(text: str) -> dict[str, Any]:
-    """The one field an `llm` grader on `last_message` reads."""
-    return {"final_text": text, "turns": [], "tool_calls": [], "outputs": [], "session_dir": ""}
+def answering(text: str) -> SessionDocument:
+    """A session document whose one read field, for an `llm` grader on `last_message`, is `text`."""
+    return SessionDocument(
+        prompt=None,
+        prompt_sha256=None,
+        session_dir="",
+        submitted_at=None,
+        collected_at="",
+        transcript=None,
+        other_transcripts=[],
+        subagent_transcripts=[],
+        audit_prompt=None,
+        lifecycle=[],
+        turns=[],
+        tool_calls=[],
+        tool_names=[],
+        final_text=text,
+        outputs=[],
+        log_file=None,
+    )
 
 
 @pytest.mark.integration

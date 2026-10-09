@@ -16,12 +16,11 @@ import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from cowork_evals import Config, CoWork, CoWorkError, CoWorkSection, traces
-from cowork_evals.cowork import TRANSCRIPTS
+from cowork_evals.cowork import TRANSCRIPTS, SessionDocument
 from cowork_evals.cowork_backend import run
 from cowork_evals.harness import RESULT_NAME
 from cowork_evals.verdict import decide
@@ -50,7 +49,7 @@ class Facts:
     skill_tool_use: bool = False
     outputs_written: bool = False
 
-    def with_session(self, document: dict[str, Any]) -> Facts:
+    def with_session(self, document: SessionDocument) -> Facts:
         return Facts(
             skill_tool_use=self.skill_tool_use or _fired_a_skill(document),
             outputs_written=self.outputs_written or _wrote_under_outputs(document),
@@ -61,12 +60,12 @@ class Facts:
         return self.skill_tool_use and self.outputs_written
 
 
-def _fired_a_skill(document: dict[str, Any]) -> bool:
-    return any(call.get("name") == SKILL_TOOL for call in document["tool_calls"])
+def _fired_a_skill(document: SessionDocument) -> bool:
+    return any(call.name == SKILL_TOOL for call in document.tool_calls)
 
 
-def _wrote_under_outputs(document: dict[str, Any]) -> bool:
-    return any(entry.startswith(OUTPUTS_PREFIX) for entry in document["outputs"])
+def _wrote_under_outputs(document: SessionDocument) -> bool:
+    return any(entry.startswith(OUTPUTS_PREFIX) for entry in document.outputs)
 
 
 def real_profile() -> CoWorkSection:
@@ -132,7 +131,7 @@ def test_one_run_provokes_whichever_fact_the_profile_does_not_show(attended: Pat
     facts = walk(driver)
     if not facts.both:
         document = driver.run(PROVOKE)
-        assert document["final_text"], "the provoking run produced no assistant text"
+        assert document.final_text, "the provoking run produced no assistant text"
         facts = facts.with_session(document)
     print(f"\nmeasured after provoking: {facts}")
     assert isinstance(facts.both, bool)

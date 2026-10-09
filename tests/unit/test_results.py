@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from cowork_evals.cases import Case, Grader, ToolUsedConfig, read
+from cowork_evals.cowork import SessionDocument
 from cowork_evals.grader import GraderResult
 from cowork_evals.harness import RESULT_NAME
 from cowork_evals.results import CaseResult, Run, build, write
@@ -26,10 +27,10 @@ STARTED = "2026-09-09T10:00:00+00:00"
 VERSION = "2.1.265"
 
 
-def session(name: str) -> dict[str, Any]:
-    loaded = json.loads((DATA / "documents" / f"{name}.json").read_text(encoding="utf-8"))
-    loaded["session_dir"] = str(DATA / "documents" / loaded["session_dir"])
-    return loaded
+def session(name: str) -> SessionDocument:
+    path = DATA / "documents" / f"{name}.json"
+    loaded = SessionDocument.model_validate_json(path.read_text(encoding="utf-8"))
+    return loaded.model_copy(update={"session_dir": str(path.parent / loaded.session_dir)})
 
 
 def result(name: str, passed: bool, weight: int | float = 1, **extra: Any) -> GraderResult:
@@ -79,8 +80,7 @@ def test_a_run_is_built_from_the_session_document() -> None:
 
 
 def test_a_session_with_no_timestamp_and_no_transcript_omits_three_fields() -> None:
-    document = session("quiet")
-    document["submitted_at"] = None
+    document = session("quiet").model_copy(update={"submitted_at": None})
     entry = Run.collected(document, (), timeout_seconds=300.0).document()
     assert "startedAt" not in entry
     assert "durationSeconds" not in entry

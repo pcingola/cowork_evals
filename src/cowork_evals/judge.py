@@ -34,6 +34,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .cases import BaselineGraderConfig, FileTarget, Grader, LlmGraderConfig
 from .config import Config
+from .cowork import SessionDocument
 from .grader import GraderResult, failed, produced_file, resolve_target, skipped
 
 # What the judge is shown, and what is recorded of it. The first is what the harness shows
@@ -251,7 +252,7 @@ def truncate(text: str, limit: int) -> str:
     return text[:head] + ELISION + text[-tail:]
 
 
-def material(grader: Grader, document: dict[str, Any], case_dir: Path) -> Material:
+def material(grader: Grader, document: SessionDocument, case_dir: Path) -> Material:
     """What this grader's judge is shown.
 
     An `llm` grader reads `focus`; `target` on one is ignored, because the harness ignores
@@ -274,7 +275,7 @@ def material(grader: Grader, document: dict[str, Any], case_dir: Path) -> Materi
 
 
 def _baseline_material(
-    config: BaselineGraderConfig, document: dict[str, Any], case_dir: Path
+    config: BaselineGraderConfig, document: SessionDocument, case_dir: Path
 ) -> Material:
     named = config.baseline_file
     if not named:
@@ -294,7 +295,7 @@ def _baseline_material(
     return Material(text="\n".join([BASELINE_HEADING, text, "", NEW_HEADING, trajectory.text]))
 
 
-def _file_material(document: dict[str, Any], path: str) -> Material:
+def _file_material(document: SessionDocument, path: str) -> Material:
     named, error = produced_file(document, path)
     if named is None:
         return Material(error=error)
@@ -392,7 +393,7 @@ def tally(grader: Grader, replies: list[Reply], evidence: str) -> Judged:
     )
 
 
-def grade(grader: Grader, document: dict[str, Any], case_dir: Path | str, *, model: str) -> Judged:
+def grade(grader: Grader, document: SessionDocument, case_dir: Path | str, *, model: str) -> Judged:
     """One judged grader: compose once, vote as many times as configured, count.
 
     A config that does not validate fails the grader with the reason, and asks no judge.

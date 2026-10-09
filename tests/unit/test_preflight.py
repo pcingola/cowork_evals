@@ -8,7 +8,6 @@ preflight table in docs/cli.md. See ../README.md.
 
 from __future__ import annotations
 
-import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +16,7 @@ import pytest
 
 from cowork_evals import preflight
 from cowork_evals.config import Config
+from cowork_evals.cowork import RunLogEntry
 
 DATA = Path(__file__).resolve().parent.parent / "data"
 TREE = DATA / "cases" / "tree"
@@ -126,14 +126,13 @@ def test_the_platform_is_reported_only_off_macos(tmp_path: Path) -> None:
 
 def run_log(path: Path, entries: int) -> None:
     """A CoWork run log carrying `entries` submissions inside the trailing 24 hours."""
-    stamp = datetime.now(timezone.utc).isoformat()
-    path.write_text(
-        "".join(
-            json.dumps({"timestamp": stamp, "outcome": "collected", "session_dir": None}) + "\n"
-            for _ in range(entries)
-        ),
-        encoding="utf-8",
+    entry = RunLogEntry(
+        timestamp=datetime.now(timezone.utc),
+        prompt_sha256="0" * 64,
+        session_dir=None,
+        outcome="collected",
     )
+    path.write_text((entry.model_dump_json() + "\n") * entries, encoding="utf-8")
 
 
 def test_a_suite_inside_the_ceiling_reports_nothing(tmp_path: Path) -> None:

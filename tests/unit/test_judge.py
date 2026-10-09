@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from cowork_evals.cases import Grader
+from cowork_evals.cowork import SessionDocument
 from cowork_evals.judge import (
     CHECK_INSTRUCTION,
     CHECK_TOOLS,
@@ -45,10 +46,10 @@ JUDGE = DATA / "judge"
 CASE = JUDGE / "case"
 
 
-def document(name: str) -> dict[str, Any]:
-    loaded = json.loads((DATA / "documents" / f"{name}.json").read_text(encoding="utf-8"))
-    loaded["session_dir"] = str(DATA / "documents" / loaded["session_dir"])
-    return loaded
+def document(name: str) -> SessionDocument:
+    path = DATA / "documents" / f"{name}.json"
+    loaded = SessionDocument.model_validate_json(path.read_text(encoding="utf-8"))
+    return loaded.model_copy(update={"session_dir": str(path.parent / loaded.session_dir)})
 
 
 def recorded(name: str) -> str:
@@ -62,12 +63,12 @@ def grader(kind: str, markdown: str = "", name: str = "j", **config: Any) -> Gra
 
 
 @pytest.fixture
-def answered() -> dict[str, Any]:
+def answered() -> SessionDocument:
     return document("answered")
 
 
 @pytest.fixture
-def produced() -> dict[str, Any]:
+def produced() -> SessionDocument:
     return document("produced")
 
 
@@ -167,23 +168,23 @@ def test_the_material_is_truncated_head_and_tail() -> None:
     assert truncate("short", MATERIAL_LIMIT) == "short"
 
 
-def test_an_llm_grader_reads_focus_and_ignores_target(answered: dict[str, Any]) -> None:
+def test_an_llm_grader_reads_focus_and_ignores_target(answered: SessionDocument) -> None:
     shown = material(grader("llm", focus="files", target="last_message"), answered, CASE)
     assert shown.error is None
     assert shown.text == "figures/chart.svg\nreport.md"
 
 
-def test_an_llm_grader_defaults_to_the_last_message(answered: dict[str, Any]) -> None:
+def test_an_llm_grader_defaults_to_the_last_message(answered: SessionDocument) -> None:
     shown = material(grader("llm"), answered, CASE)
     assert shown.text == "Hello Alex. The report is in report.md."
 
 
-def test_an_llm_grader_reads_a_produced_file(produced: dict[str, Any]) -> None:
+def test_an_llm_grader_reads_a_produced_file(produced: SessionDocument) -> None:
     focus = {"source": "file", "path": "notes.md"}
     assert material(grader("llm", focus=focus), produced, CASE).text == "A plain note.\n"
 
 
-def test_a_baseline_grader_shows_both_trajectories(answered: dict[str, Any]) -> None:
+def test_a_baseline_grader_shows_both_trajectories(answered: SessionDocument) -> None:
     shown = material(grader("baseline", baseline_file="gold/trace.jsonl"), answered, CASE)
     assert shown.error is None
     assert "BASELINE TRAJECTORY:" in shown.text
@@ -192,12 +193,12 @@ def test_a_baseline_grader_shows_both_trajectories(answered: dict[str, Any]) -> 
     assert '"Hello Alex. The report is in report.md."' in shown.text
 
 
-def test_a_baseline_file_outside_the_case_directory_is_refused(answered: dict[str, Any]) -> None:
+def test_a_baseline_file_outside_the_case_directory_is_refused(answered: SessionDocument) -> None:
     shown = material(grader("baseline", baseline_file="../reply_pass.json"), answered, CASE)
     assert shown.error == "../reply_pass.json resolves outside the case directory"
 
 
-def test_an_absent_baseline_file_is_a_failed_grader(answered: dict[str, Any]) -> None:
+def test_an_absent_baseline_file_is_a_failed_grader(answered: SessionDocument) -> None:
     shown = material(grader("baseline", baseline_file="gold/absent.jsonl"), answered, CASE)
     assert shown.error is not None
     assert "absent.jsonl" in shown.error
@@ -206,7 +207,7 @@ def test_an_absent_baseline_file_is_a_failed_grader(answered: dict[str, Any]) ->
 # What the judge cannot be shown.
 
 
-def test_an_image_focus_is_a_grader_skip_and_not_a_failure(produced: dict[str, Any]) -> None:
+def test_an_image_focus_is_a_grader_skip_and_not_a_failure(produced: SessionDocument) -> None:
     focus = {"source": "file", "path": "slide.png"}
     shown = material(grader("llm", focus=focus), produced, CASE)
     assert shown.error is None
@@ -214,7 +215,7 @@ def test_an_image_focus_is_a_grader_skip_and_not_a_failure(produced: dict[str, A
     assert "slide.png is an image" in shown.skip_reason
 
 
-def test_another_binary_focus_is_a_failed_grader(produced: dict[str, Any]) -> None:
+def test_another_binary_focus_is_a_failed_grader(produced: SessionDocument) -> None:
     focus = {"source": "file", "path": "deck.pptx"}
     shown = material(grader("llm", focus=focus), produced, CASE)
     assert shown.skip_reason is None

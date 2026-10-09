@@ -14,7 +14,6 @@ exits 2. Its design stays in docs/staged_runtime.md.
 from __future__ import annotations
 
 import argparse
-import json
 import shutil
 import sys
 from dataclasses import dataclass, field
@@ -39,7 +38,7 @@ from . import (
 )
 from .cases import CaseError, discover, plugin_name, plugin_roots
 from .config import ABLATION_CHOICES, Config, CoWorkError, CoWorkSection, EvalSection, checked
-from .cowork import CoWork
+from .cowork import CoWork, SessionDocument
 from .docker import Condition, Docker, DockerError, pytest_image, remedy
 from .docker.pytest_image import PytestImage
 from .harness import RunOptions
@@ -991,7 +990,7 @@ def _ask_failure(args: argparse.Namespace, config: Config, prompt: str, error: C
     return _refuse([message], FAILED)
 
 
-def _ask_print(session: dict[str, Any], args: argparse.Namespace) -> int:
+def _ask_print(session: SessionDocument, args: argparse.Namespace) -> int:
     """The answer on stdout, and what produced it on stderr.
 
     The split is so that `cowork_evals ask --cowork "..." > answer.txt` holds the answer and
@@ -1000,17 +999,17 @@ def _ask_print(session: dict[str, Any], args: argparse.Namespace) -> int:
     in it already. docs/cli.md.
     """
     if args.json:
-        print(json.dumps(session, indent=2))
+        print(session.model_dump_json(indent=2))
         return OK
 
-    print(session["final_text"])
-    assistant = sum(1 for turn in session["turns"] if turn["role"] == "assistant")
+    print(session.final_text)
+    assistant = sum(1 for turn in session.turns if turn.role == "assistant")
     for label, value in (
-        ("session", session["session_dir"]),
+        ("session", session.session_dir),
         ("assistant turns", assistant),
-        ("tools", ", ".join(session["tool_names"])),
-        ("outputs", ", ".join(session["outputs"])),
-        ("log", session["log_file"]),
+        ("tools", ", ".join(session.tool_names)),
+        ("outputs", ", ".join(session.outputs)),
+        ("log", session.log_file),
     ):
         if value:
             print(f"{label}: {value}", file=sys.stderr)

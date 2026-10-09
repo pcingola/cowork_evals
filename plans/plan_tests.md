@@ -111,7 +111,7 @@ writes exactly the keys and values the module writes today, except where `plan_m
 - [x] Add `pydantic` to `dependencies` in `pyproject.toml`.
 - [x] `cases.py`: `PluginManifest`, `PromptFrontmatter`, `CaseYaml`, `CaseContext`, `GraderConfig` and its six configs, `FileTarget`.
 - [x] `grader.py`: `GraderResult` as `plan_models.md` gives it, and the graders read the typed configs.
-- [ ] `cowork.py`: `SessionDocument`, `Turn`, `ToolCall`, `RunLogEntry`, `SessionRecord`, `AuditRecord`, `Message`, `ContentBlock`. `docs/cowork_driver_internals.md` "The API" says `run` and `collect` return a `SessionDocument`, serialised with `model_dump_json()`, and `history` returns one `RunLogEntry` per line, oldest first.
+- [x] `cowork.py`: `SessionDocument`, `Turn`, `ToolCall`, `RunLogEntry`, `SessionRecord`, `AuditRecord`, `Message`, `ContentBlock`. `docs/cowork_driver_internals.md` "The API" says `run` and `collect` return a `SessionDocument`, serialised with `model_dump_json()`, and `history` returns one `RunLogEntry` per line, oldest first.
 - [x] `judge.py`: `JudgeOutput`, `JudgeVerdict`, and the typed `LlmGraderConfig` and `BaselineGraderConfig`.
 - [ ] `results.py`: `ResultDocument`, `SuiteInfo`, `PluginRef`, `SuiteAggregates`, `CaseEntry`, `Arms`, `CaseAggregates`, `GraderDefinition`, `RunEntry`, `CoWorkRef`. `results.Run` and `results.CaseResult` are removed.
 - [ ] `cowork_backend.py` reads and writes `ResultDocument` and `SessionDocument`.

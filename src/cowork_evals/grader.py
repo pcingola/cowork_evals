@@ -37,6 +37,7 @@ from .cases import (
     ToolSpec,
     ToolUsedConfig,
 )
+from .cowork import SessionDocument
 
 # The grader types this module answers for. `llm` and `baseline` are judge.py's.
 STRUCTURAL = ("regex", "tool_used", "tool_order", "file_exists")
@@ -136,7 +137,7 @@ def failed(grader: Grader, explanation: str) -> GraderResult:
     )
 
 
-def grade(grader: Grader, document: dict[str, Any]) -> GraderResult:
+def grade(grader: Grader, document: SessionDocument) -> GraderResult:
     """One structural grader. An unknown type, or a config that does not validate, fails it."""
     if grader.config_error is not None:
         return failed(grader, f"invalid config: {grader.config_error}")
@@ -155,14 +156,14 @@ def grade(grader: Grader, document: dict[str, Any]) -> GraderResult:
 # The targets.
 
 
-def created(document: dict[str, Any]) -> list[str]:
+def created(document: SessionDocument) -> list[str]:
     """The produced files, relative to `outputs/`. The prefix is stripped exactly here."""
     prefix = f"{OUTPUTS}/"
-    entries = document.get("outputs") or []
+    entries = document.outputs
     return [entry[len(prefix) :] if entry.startswith(prefix) else entry for entry in entries]
 
 
-def resolve_target(document: dict[str, Any], spec: str | FileTarget | None) -> Target:
+def resolve_target(document: SessionDocument, spec: str | FileTarget | None) -> Target:
     """What a `target` or a `focus` names, as text.
 
     It is text every time: a regex and a judge both read text, and the reference makes
@@ -170,7 +171,7 @@ def resolve_target(document: dict[str, Any], spec: str | FileTarget | None) -> T
     here, because it reads the stripped list rather than a rendering of it.
     """
     if spec is None or spec == LAST_MESSAGE:
-        return Target(text=document.get("final_text") or "")
+        return Target(text=document.final_text)
     if spec == TRACE:
         return Target(text=_trace(document))
     if spec == FILES:
@@ -180,17 +181,17 @@ def resolve_target(document: dict[str, Any], spec: str | FileTarget | None) -> T
     return Target(error=f"unknown target: {spec!r}")
 
 
-def _trace(document: dict[str, Any]) -> str:
+def _trace(document: SessionDocument) -> str:
     """The session as JSON, one object per line: every turn, then every tool call.
 
     This rendering is this backend's, not the harness's `trace.jsonl`, so a regex grader
     on `target: trace` is not portable between backends. docs/cowork_backend.md.
     """
-    entries = [*(document.get("turns") or []), *(document.get("tool_calls") or [])]
-    return "\n".join(json.dumps(entry) for entry in entries)
+    entries = [*document.turns, *document.tool_calls]
+    return "\n".join(json.dumps(entry.model_dump(mode="json")) for entry in entries)
 
 
-def produced_file(document: dict[str, Any], path: Any) -> tuple[Path | None, str | None]:
+def produced_file(document: SessionDocument, path: Any) -> tuple[Path | None, str | None]:
     """Where a produced file is on the host, or the reason it cannot be read from here.
 
     `outputs/` is the workspace on this backend, and the reference confines a file target
@@ -199,14 +200,14 @@ def produced_file(document: dict[str, Any], path: Any) -> tuple[Path | None, str
     """
     if not isinstance(path, str) or not path:
         return None, "a file target needs a path"
-    root = (Path(document.get("session_dir", "")) / OUTPUTS).resolve()
+    root = (Path(document.session_dir) / OUTPUTS).resolve()
     named = (root / path).resolve()
     if not named.is_relative_to(root):
         return None, f"{path} resolves outside {OUTPUTS}/"
     return named, None
 
 
-def _produced_file(document: dict[str, Any], path: Any) -> Target:
+def _produced_file(document: SessionDocument, path: Any) -> Target:
     named, error = produced_file(document, path)
     if named is None:
         return Target(error=error)
@@ -238,7 +239,7 @@ def compile_pattern(pattern: Any, flags: Any = "") -> re.Pattern[str]:
 # The four graders.
 
 
-def _regex(grader: Grader, config: RegexConfig, document: dict[str, Any]) -> GraderResult:
+def _regex(grader: Grader, config: RegexConfig, document: SessionDocument) -> GraderResult:
     pattern = config.pattern
     if pattern is None:
         return failed(grader, "regex grader has no pattern")
@@ -271,7 +272,7 @@ def _regex(grader: Grader, config: RegexConfig, document: dict[str, Any]) -> Gra
     return _verdict(grader, hits > 0, f"matched {pattern}", f"no match for {pattern}")
 
 
-def _tool_used(grader: Grader, config: ToolUsedConfig, document: dict[str, Any]) -> GraderResult:
+def _tool_used(grader: Grader, config: ToolUsedConfig, document: SessionDocument) -> GraderResult:
     tool = config.tool
     if tool is None:
         return failed(grader, "tool_used grader has no tool")
@@ -292,7 +293,7 @@ def _tool_used(grader: Grader, config: ToolUsedConfig, document: dict[str, Any])
     )
 
 
-def _tool_order(grader: Grader, config: ToolOrderConfig, document: dict[str, Any]) -> GraderResult:
+def _tool_order(grader: Grader, config: ToolOrderConfig, document: SessionDocument) -> GraderResult:
     """`before` and `after`, each a tool name or `{tool, input_match}`.
 
     It reads `tool_calls` and not `tool_names`, because of the object form: a name alone
@@ -364,7 +365,7 @@ def _glob_segment(segment: str) -> str:
 
 
 def _file_exists(
-    grader: Grader, config: FileExistsConfig, document: dict[str, Any]
+    grader: Grader, config: FileExistsConfig, document: SessionDocument
 ) -> GraderResult:
     """`path` as a glob over the produced files, with the harness's glob semantics.
 
@@ -400,20 +401,20 @@ def _verdict(grader: Grader, passed: bool, when_passed: str, when_failed: str) -
     )
 
 
-def _matching_calls(document: dict[str, Any], tool: str, input_match: str | None) -> list[int]:
+def _matching_calls(document: SessionDocument, tool: str, input_match: str | None) -> list[int]:
     """The index of every call of `tool` whose JSON-encoded input matches, in call order."""
     compiled = None if input_match is None else compile_pattern(input_match)
     found = []
-    for index, call in enumerate(document.get("tool_calls") or []):
-        if call.get("name") != tool:
+    for index, call in enumerate(document.tool_calls):
+        if call.name != tool:
             continue
-        if compiled is not None and not compiled.search(json.dumps(call.get("input"))):
+        if compiled is not None and not compiled.search(json.dumps(call.input)):
             continue
         found.append(index)
     return found
 
 
-def _first_index(document: dict[str, Any], spec: str | ToolSpec | None) -> int | None:
+def _first_index(document: SessionDocument, spec: str | ToolSpec | None) -> int | None:
     """The first call matching a `tool_order` end, as an index into `tool_calls`."""
     if spec is None:
         return None

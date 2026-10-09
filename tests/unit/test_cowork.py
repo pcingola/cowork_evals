@@ -17,6 +17,7 @@ import pytest
 from cowork_evals import CoWork, CoWorkError, CoWorkSection
 from cowork_evals import cowork as driver_module
 from cowork_evals.config import CONFIG_FILENAME, CONSENT_DIALOG, CONSENT_NONE
+from cowork_evals.cowork import Turn
 
 ROOT = Path(__file__).resolve().parent.parent / "data" / "cowork" / "sessions"
 PROFILE = ROOT / "acct0000" / "prof0000"
@@ -73,91 +74,91 @@ def test_the_session_document_carries_exactly_the_documented_keys(
     driver: CoWork, session_document_keys: set[str]
 ) -> None:
     document = driver.collect(PROFILE / "one_turn")
-    assert set(document) == session_document_keys
-    assert "exit_code" not in document
+    assert set(document.model_dump()) == session_document_keys
+    assert "exit_code" not in document.model_dump()
 
 
 def test_the_session_document_is_json_serializable_with_no_profile(driver: CoWork) -> None:
     assert driver.config.profile is None
-    text = json.dumps(driver.collect(PROFILE / "one_turn"))
+    text = driver.collect(PROFILE / "one_turn").model_dump_json()
     assert json.loads(text)["final_text"] == "PONG"
 
 
 def test_a_one_turn_session(driver: CoWork) -> None:
     document = driver.collect(PROFILE / "one_turn")
-    assert document["prompt"] == "Reply with exactly: PONG"
-    assert document["audit_prompt"] == "Reply with exactly: PONG"
-    assert document["prompt_sha256"] == (
+    assert document.prompt == "Reply with exactly: PONG"
+    assert document.audit_prompt == "Reply with exactly: PONG"
+    assert document.prompt_sha256 == (
         "0fb5aed1b51b28b04409b7963b2453fe1597d198c3b8396fc8ebd072104511de"
     )
-    assert document["submitted_at"] == "2026-09-08T10:00:00.000Z"
-    assert document["lifecycle"] == ["queued", "started", "completed"]
-    assert document["turns"] == [
-        {"role": "user", "text": "Reply with exactly: PONG"},
-        {"role": "assistant", "text": "PONG"},
+    assert document.submitted_at == "2026-09-08T10:00:00.000Z"
+    assert document.lifecycle == ["queued", "started", "completed"]
+    assert document.turns == [
+        Turn(role="user", text="Reply with exactly: PONG"),
+        Turn(role="assistant", text="PONG"),
     ]
-    assert document["final_text"] == "PONG"
-    assert document["tool_calls"] == []
-    assert document["tool_names"] == []
-    assert document["outputs"] == ["outputs/marker.txt"]
-    assert document["other_transcripts"] == []
-    assert document["subagent_transcripts"] == []
-    assert document["log_file"] is None
+    assert document.final_text == "PONG"
+    assert document.tool_calls == []
+    assert document.tool_names == []
+    assert document.outputs == ["outputs/marker.txt"]
+    assert document.other_transcripts == []
+    assert document.subagent_transcripts == []
+    assert document.log_file is None
 
 
 def test_a_thinking_block_is_not_turn_text(driver: CoWork) -> None:
     document = driver.collect(PROFILE / "one_turn")
-    assert "the marker is PONG" not in json.dumps(document["turns"])
+    assert "the marker is PONG" not in document.model_dump_json(include={"turns"})
 
 
 def test_the_main_transcript_is_the_newest_top_level_file(driver: CoWork) -> None:
     document = driver.collect(PROFILE / "tool_call")
-    assert Path(document["transcript"]).name == "t-0002-new.jsonl"
-    assert [Path(p).name for p in document["other_transcripts"]] == ["t-0002-old.jsonl"]
-    assert "an earlier run" not in json.dumps(document["turns"])
+    assert Path(document.transcript).name == "t-0002-new.jsonl"
+    assert [Path(p).name for p in document.other_transcripts] == ["t-0002-old.jsonl"]
+    assert "an earlier run" not in document.model_dump_json(include={"turns"})
 
 
 def test_a_tool_result_pairs_by_id_and_not_by_position(driver: CoWork) -> None:
     document = driver.collect(PROFILE / "tool_call")
-    calls = {call["id"]: call for call in document["tool_calls"]}
+    calls = {call.id: call for call in document.tool_calls}
     assert set(calls) == {"call-a", "call-b"}
-    assert calls["call-a"]["input"] == {"command": "cat /etc/os-release"}
-    assert calls["call-a"]["result"] == 'NAME="Ubuntu"'
-    assert calls["call-b"]["input"] == {"command": "uname -r"}
-    assert calls["call-b"]["result"] == "6.8.0-136-generic"
-    assert document["tool_names"] == ["mcp__workspace__bash", "mcp__workspace__bash"]
+    assert calls["call-a"].input == {"command": "cat /etc/os-release"}
+    assert calls["call-a"].result == 'NAME="Ubuntu"'
+    assert calls["call-b"].input == {"command": "uname -r"}
+    assert calls["call-b"].result == "6.8.0-136-generic"
+    assert document.tool_names == ["mcp__workspace__bash", "mcp__workspace__bash"]
 
 
 def test_a_tool_call_carries_its_mcp_attribution(driver: CoWork) -> None:
-    call = driver.collect(PROFILE / "tool_call")["tool_calls"][0]
-    assert call["mcp_server"] == "workspace"
-    assert call["mcp_tool"] == "bash"
-    assert call["timestamp"] == "2026-09-08T11:00:05.000Z"
+    call = driver.collect(PROFILE / "tool_call").tool_calls[0]
+    assert call.mcp_server == "workspace"
+    assert call.mcp_tool == "bash"
+    assert call.timestamp == "2026-09-08T11:00:05.000Z"
 
 
 def test_an_orphan_tool_result_is_dropped(driver: CoWork) -> None:
     document = driver.collect(PROFILE / "tool_call")
-    assert "belongs to a subagent" not in json.dumps(document["tool_calls"])
+    assert "belongs to a subagent" not in document.model_dump_json(include={"tool_calls"})
 
 
 def test_string_content_is_read_as_turn_text(driver: CoWork) -> None:
     document = driver.collect(PROFILE / "tool_call")
-    assert document["final_text"] == "The guest kernel is 6.8.0-136-generic."
+    assert document.final_text == "The guest kernel is 6.8.0-136-generic."
 
 
 def test_a_subagent_transcript_is_recorded_and_never_merged(driver: CoWork) -> None:
     document = driver.collect(PROFILE / "subagent")
-    assert [Path(p).name for p in document["subagent_transcripts"]] == ["agent-0001.jsonl"]
-    assert document["other_transcripts"] == []
-    assert document["final_text"] == "There are three notes, all about the mirror."
-    assert "Read every note" not in json.dumps(document["turns"])
+    assert [Path(p).name for p in document.subagent_transcripts] == ["agent-0001.jsonl"]
+    assert document.other_transcripts == []
+    assert document.final_text == "There are three notes, all about the mirror."
+    assert "Read every note" not in document.model_dump_json(include={"turns"})
 
 
 def test_a_truncated_tail_keeps_the_records_before_it(driver: CoWork) -> None:
     """Both fixture files end mid-record, which is what a file being appended looks like."""
     document = driver.collect(PROFILE / "partial_line")
-    assert document["lifecycle"] == ["queued", "started"]
-    assert document["final_text"] == "Ubuntu 22.04.5 LTS"
+    assert document.lifecycle == ["queued", "started"]
+    assert document.final_text == "Ubuntu 22.04.5 LTS"
 
 
 def test_a_session_with_no_assistant_output_raises_code_8(driver: CoWork) -> None:
@@ -175,8 +176,8 @@ def test_a_session_with_no_transcript_directory_raises_code_8(driver: CoWork) ->
 
 def test_a_known_prompt_beats_the_audit_record(driver: CoWork) -> None:
     document = driver.collect(PROFILE / "one_turn", prompt="what the caller submitted")
-    assert document["prompt"] == "what the caller submitted"
-    assert document["audit_prompt"] == "Reply with exactly: PONG"
+    assert document.prompt == "what the caller submitted"
+    assert document.audit_prompt == "Reply with exactly: PONG"
 
 
 def test_a_constructor_override_beats_the_configuration() -> None:
@@ -274,7 +275,12 @@ def test_the_rate_ceiling_is_refused(tmp_path: Path) -> None:
 
 def test_the_ceiling_counts_only_the_trailing_24_hours(tmp_path: Path) -> None:
     driver = build(tmp_path, max_runs=2)
-    old = {"timestamp": "2020-01-01T00:00:00+00:00", "outcome": "submitted"}
+    old = {
+        "timestamp": "2020-01-01T00:00:00+00:00",
+        "prompt_sha256": "0" * 64,
+        "session_dir": None,
+        "outcome": "submitted",
+    }
     driver.config.run_log.write_text(json.dumps(old) + "\n", encoding="utf-8")
     driver._record("Reply with exactly: PONG", None, "submitted")
     driver._check("Reply with exactly: PONG")
@@ -285,16 +291,17 @@ def test_a_failed_submission_leaves_a_line_history_reads_back(tmp_path: Path) ->
     driver._record("first", None, "failed:4")
     driver._record("second", tmp_path / "session", "submitted")
     entries = driver.history()
-    assert [entry["outcome"] for entry in entries] == ["failed:4", "submitted"]
-    assert entries[0]["session_dir"] is None
-    assert entries[1]["session_dir"] == str(tmp_path / "session")
-    assert set(entries[0]) == {"timestamp", "prompt_sha256", "session_dir", "outcome"}
+    assert [entry.outcome for entry in entries] == ["failed:4", "submitted"]
+    assert entries[0].session_dir is None
+    assert entries[1].session_dir == str(tmp_path / "session")
+    assert set(entries[0].model_dump()) == {"timestamp", "prompt_sha256", "session_dir", "outcome"}
 
 
 def test_history_reads_a_named_run_log(tmp_path: Path) -> None:
     other = tmp_path / "other.jsonl"
-    other.write_text('{"outcome":"submitted"}\n{"outcome":"fail\n', encoding="utf-8")
-    assert build(tmp_path).history(other) == [{"outcome": "submitted"}]
+    line = '{"timestamp":"2026-09-08T10:00:00+00:00","prompt_sha256":"%s","session_dir":null,'
+    other.write_text(line % ("0" * 64) + '"outcome":"submitted"}\n{"outcome":"fail\n', "utf-8")
+    assert [entry.outcome for entry in build(tmp_path).history(other)] == ["submitted"]
 
 
 def test_history_of_an_absent_run_log_is_empty(tmp_path: Path) -> None:
@@ -342,8 +349,8 @@ def test_the_session_document_names_the_diagnostic_log(tmp_path: Path) -> None:
     driver = build(tmp_path)
     with driver._diagnostics() as path:
         document = driver.collect(PROFILE / "one_turn")
-    assert document["log_file"] == str(path)
-    assert driver.collect(PROFILE / "one_turn")["log_file"] is None
+    assert document.log_file == str(path)
+    assert driver.collect(PROFILE / "one_turn").log_file is None
 
 
 # Submitting. No stand-in for the application: a test writes the session directories the
@@ -527,7 +534,7 @@ def test_consent_none_shows_nothing_and_leaves_the_module_flag_alone(tmp_path: P
 def test_reading_a_session_never_asks_for_consent(driver: CoWork, tmp_path: Path) -> None:
     """`collect` and `deep_link` fire nothing, so `consent: dialog` does not reach them."""
     assert driver.config.consent == CONSENT_DIALOG
-    assert driver.collect(PROFILE / "one_turn")["final_text"] == "PONG"
+    assert driver.collect(PROFILE / "one_turn").final_text == "PONG"
     assert driver.deep_link("PING") == "claude://claude.ai/new?q=PING&surface=cowork"
 
     reading = build(tmp_path)
@@ -556,7 +563,12 @@ def test_code_9_is_its_own_row_of_the_taxonomy_and_is_not_code_3() -> None:
 def test_recent_counts_the_trailing_24_hours_of_a_hand_written_run_log(tmp_path: Path) -> None:
     """The CoWork backend calls this rather than re-deriving the window over `history()`."""
     driver = build(tmp_path)
-    old = {"timestamp": "2020-01-01T00:00:00+00:00", "outcome": "submitted"}
+    old = {
+        "timestamp": "2020-01-01T00:00:00+00:00",
+        "prompt_sha256": "0" * 64,
+        "session_dir": None,
+        "outcome": "submitted",
+    }
     driver.config.run_log.write_text(json.dumps(old) + "\n", encoding="utf-8")
     assert driver.recent() == 0
     driver._record("Reply with exactly: PONG", None, "submitted")

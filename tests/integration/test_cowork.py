@@ -50,13 +50,10 @@ def test_the_reader_handles_every_session_in_a_real_profile(
         except CoWorkError as error:
             assert error.code in TAXONOMY
             continue
-        assert set(document) == session_document_keys
-        json.dumps(document)
-        assert isinstance(document["final_text"], str)
-        assert document["final_text"]
-        for call in document["tool_calls"]:
-            assert isinstance(call["name"], str)
-        assert document["tool_names"] == [call["name"] for call in document["tool_calls"]]
+        assert set(document.model_dump()) == session_document_keys
+        json.loads(document.model_dump_json())
+        assert document.final_text
+        assert document.tool_names == [call.name for call in document.tool_calls]
 
 
 # The focus mechanism: the frontmost guard and the composer clear. docs/cowork_driver.md.
@@ -134,9 +131,9 @@ def test_focus_a_primed_composer_is_cleared_before_the_prompt(attended: Path, ac
     prompt = f"Reply with exactly: {marker}"
     document = driver.run(prompt)
 
-    assert document["audit_prompt"] == prompt
-    assert "CONTAMINATION" not in document["audit_prompt"]
-    assert marker in document["final_text"]
+    assert document.audit_prompt == prompt
+    assert "CONTAMINATION" not in document.audit_prompt
+    assert marker in document.final_text
 
 
 # The only test that proves the application end of the contract: that the deep link
@@ -170,20 +167,20 @@ def test_a_live_run_returns_the_marker(attended: Path, session_document_keys: se
     document = driver.run(f"Reply with exactly: {marker}")
 
     assert driver_module._CONSENTED is True, "the driver asked, and the ask set the flag"
-    assert marker in document["final_text"]
-    assert document["lifecycle"][-1] == "completed"
-    assert set(document) == session_document_keys
+    assert marker in document.final_text
+    assert document.lifecycle[-1] == "completed"
+    assert set(document.model_dump()) == session_document_keys
     json.dumps(document)
 
     assert len(driver.sessions()) == before + 1
-    assert Path(document["session_dir"]) in driver.sessions()
+    assert Path(document.session_dir) in driver.sessions()
 
     entries = driver.history()
     assert len(entries) == before_log + 1
-    assert entries[-1]["outcome"] == "submitted"
-    assert entries[-1]["session_dir"] == document["session_dir"]
+    assert entries[-1].outcome == "submitted"
+    assert entries[-1].session_dir == document.session_dir
 
-    written = Path(document["log_file"]).read_text(encoding="utf-8")
+    written = Path(document.log_file).read_text(encoding="utf-8")
     assert "firing the deep link:" in written
     assert "discovered the session:" in written
     assert "the completion signal fired: lifecycle state completed" in written

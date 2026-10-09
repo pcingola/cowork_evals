@@ -15,11 +15,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from .cases import EVAL_DIR, JUDGED, NO_COWORK, Case, CaseError, discover, plugin_roots
 from .config import Config, CoWorkError
-from .cowork import CoWork
+from .cowork import CoWork, SessionDocument
 from .grader import grade as grade_structural
 from .grader import skipped as skipped_result
 from .judge import grade as grade_judged
@@ -316,7 +315,7 @@ def _after_failure(driver: CoWork, entry: Entry, model: str, error: CoWorkError)
     return Run(session_dir=session_dir, timeout_seconds=entry.timeout_seconds, error=message)
 
 
-def _graded(session: dict[str, Any], entry: Entry, model: str, *, error: str | None = None) -> Run:
+def _graded(session: SessionDocument, entry: Entry, model: str, *, error: str | None = None) -> Run:
     """Every grader of one case against one session document, structural then judged."""
     results = []
     judge_cost = 0.0

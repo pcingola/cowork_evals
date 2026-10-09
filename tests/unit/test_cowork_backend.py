@@ -15,6 +15,7 @@ import pytest
 
 from cowork_evals.cases import CaseError, read
 from cowork_evals.config import Config, CoWorkError, CoWorkSection
+from cowork_evals.cowork import RunLogEntry
 from cowork_evals.cowork_backend import declared, grader_skips, plan, run, unrunnable
 from cowork_evals.harness import RESULT_NAME
 
@@ -212,14 +213,13 @@ def settings(tmp_path: Path, **overrides: object) -> Config:
 
 def log(path: Path, submissions: int) -> None:
     """A hand-written run log, `submissions` entries inside the trailing 24 hours."""
-    stamp = datetime.now(timezone.utc).isoformat()
-    path.write_text(
-        "".join(
-            json.dumps({"timestamp": stamp, "outcome": "submitted"}) + "\n"
-            for _ in range(submissions)
-        ),
-        encoding="utf-8",
+    entry = RunLogEntry(
+        timestamp=datetime.now(timezone.utc),
+        prompt_sha256="0" * 64,
+        session_dir=None,
+        outcome="submitted",
     )
+    path.write_text((entry.model_dump_json() + "\n") * submissions, encoding="utf-8")
 
 
 def test_the_smoke_fixture_is_found_and_four_of_its_cases_are_submitted(tmp_path: Path) -> None:

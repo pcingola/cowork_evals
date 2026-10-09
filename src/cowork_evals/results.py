@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .cases import JUDGED, Case, Grader, plugin_manifest, plugin_name
+from .cowork import SessionDocument
 from .grader import GraderResult
 from .harness import RESULT_NAME
 
@@ -83,7 +84,7 @@ class Run:
     @classmethod
     def collected(
         cls,
-        session: dict[str, Any],
+        session: SessionDocument,
         graders: tuple[GraderResult, ...],
         *,
         timeout_seconds: float,
@@ -97,16 +98,16 @@ class Run:
         and `tracePath` are then absent, and `durationSeconds` is absent rather than computed
         against a missing start.
         """
-        started = session.get("submitted_at")
+        started = session.submitted_at
         return cls(
             graders=graders,
-            session_dir=session.get("session_dir"),
+            session_dir=session.session_dir,
             timeout_seconds=timeout_seconds,
             judge_cost_usd=judge_cost_usd,
-            turns=sum(1 for turn in session.get("turns") or [] if turn.get("role") == "assistant"),
-            started_at=started if isinstance(started, str) else None,
-            duration_seconds=_elapsed(started, session.get("collected_at")),
-            trace_path=session.get("transcript"),
+            turns=sum(1 for turn in session.turns if turn.role == "assistant"),
+            started_at=started,
+            duration_seconds=_elapsed(started, session.collected_at),
+            trace_path=session.transcript,
             error=error,
         )
 
