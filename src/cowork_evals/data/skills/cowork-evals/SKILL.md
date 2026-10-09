@@ -1,6 +1,6 @@
 ---
 name: cowork-evals
-description: "Decides which evals a Claude CoWork skill needs, writes them, reviews the ones it has, and runs them. TRIGGER when: a skill needs evals, asked to review or audit the evals it has, writing or fixing a case, a grader or a check, or a cowork_evals command fails. NOT for authoring the skill itself, which is cowork-skill-author."
+description: "Two uses of cowork_evals: evals of a CoWork plugin (run) and pytest of its code on the CoWork runtime (test). TRIGGER when: writing or fixing an eval case, grader or check, or a plugin's tests, or running any cowork_evals command."
 ---
 
 # cowork_evals
@@ -25,17 +25,6 @@ file is the authority for anything below.
 | An assertion no grader type can express | `docs checks`            |
 | Every grader field the format is silent on | `docs claude_code/plugin_eval_reference` |
 | What `panel` shows, and the records behind it | `docs panel`           |
-
-## What to evaluate
-
-**Reading `docs eval_design` is mandatory, not optional.** Open that file and read it before
-designing a suite, before adding a case to one, before running a suite, and before reporting what a
-run produced. Answering any of those from this file is wrong, and a suite designed without that
-document is a guess whatever it scores.
-
-It covers drafting a suite from the skill, the dimensions a suite is checked against, proposing the
-draft to the developer, writing cases that show what the skill adds over the model alone, the three
-assertions every case carries, testing an assertion before a run, and reading the results of a run.
 
 ## The command
 
@@ -139,7 +128,7 @@ not one.
 
 One grader per file under `graders/`, frontmatter then the rubric or pattern. Structural
 graders are deterministic and decide the exit code. Judged graders call a model and are
-printed.
+printed. Prefer a structural one.
 
 | Type          | Takes                                                                     | Class      |
 | ------------- | ------------------------------------------------------------------------- | ---------- |
