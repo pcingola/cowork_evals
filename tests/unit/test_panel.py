@@ -8,7 +8,6 @@ are the real ones. The store and the columns are docs/panel.md. See ../README.md
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,7 +15,9 @@ from cowork_evals import logs, panel
 from cowork_evals.cases import discover
 from cowork_evals.cases import read as read_case
 from cowork_evals.harness import RESULT_NAME
+from cowork_evals.panel import HistoryRecord, PanelSnapshot
 from cowork_evals.preflight import COWORK, DOCKER
+from cowork_evals.results import PluginRef, ResultDocument
 from cowork_evals.verdict import CaseOutcome, decide
 
 DATA = Path(__file__).resolve().parent.parent / "data"
@@ -45,6 +46,26 @@ def record(name: str, plugin: str = "smoke", case_dir: str = CASE_DIR) -> Path:
 
 def installed(root: Path, name: str, plugin: str = "smoke", case_dir: str = CASE_DIR) -> Path:
     return record(name, plugin, case_dir)(root)
+
+
+def entry(**changes) -> HistoryRecord:
+    """One record, with a literal for every required field and `changes` over them."""
+    fields = {
+        "schema_version": 1,
+        "invocation": "20260903-090000-smoke",
+        "backend": DOCKER,
+        "cowork_evals": "0.4.0",
+        "plugin": "smoke",
+        "case": "one",
+        "dir": "evals/plugin/one",
+        "outcome": "pass",
+        "score": 1.0,
+        "pass_rate": 1.0,
+        "runs": 1,
+        "duration_seconds": 1.0,
+        "cost_usd": 0.0,
+    }
+    return HistoryRecord(**{**fields, **changes})
 
 
 def smoke_rows(root: Path, *, removed: bool = False):
@@ -92,9 +113,9 @@ def test_three_cases_in_one_append_land_in_three_files(tmp_path: Path) -> None:
     written = panel.append(
         tmp_path,
         [
-            {"schemaVersion": 1, "plugin": "smoke", "dir": "evals/plugin/one", "backend": DOCKER},
-            {"schemaVersion": 1, "plugin": "smoke", "dir": "evals/plugin/two", "backend": DOCKER},
-            {"schemaVersion": 1, "plugin": "other", "dir": "evals/skill/two", "backend": DOCKER},
+            entry(dir="evals/plugin/one"),
+            entry(dir="evals/plugin/two"),
+            entry(plugin="other", dir="evals/skill/two"),
         ],
     )
     assert len(written) == 3
@@ -108,11 +129,10 @@ def test_three_cases_in_one_append_land_in_three_files(tmp_path: Path) -> None:
 
 
 def test_a_second_append_adds_a_line_and_keeps_the_first(tmp_path: Path) -> None:
-    entry = {"schemaVersion": 1, "plugin": "smoke", "dir": "evals/plugin/one", "backend": DOCKER}
-    panel.append(tmp_path, [{**entry, "invocation": "first"}])
-    panel.append(tmp_path, [{**entry, "invocation": "second"}])
+    panel.append(tmp_path, [entry(invocation="first")])
+    panel.append(tmp_path, [entry(invocation="second")])
     found, warnings = panel.read(panel.path(tmp_path, "smoke", "evals/plugin/one"))
-    assert [one["invocation"] for one in found] == ["first", "second"]
+    assert [one.invocation for one in found] == ["first", "second"]
     assert warnings == []
 
 
@@ -125,7 +145,7 @@ def test_an_unparsable_last_line_is_reported_and_the_records_before_it_returned(
     """A truncated last line loses one measurement and never the whole case."""
     file = installed(tmp_path, "truncated")
     found, warnings = panel.read(file)
-    assert [one["invocation"] for one in found] == ["20260903-090000-smoke"]
+    assert [one.invocation for one in found] == ["20260903-090000-smoke"]
     assert len(warnings) == 1
     assert str(file) in warnings[0]
     assert "line 2" in warnings[0]
@@ -201,15 +221,8 @@ def dated(days: int) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
 
-def aged(dir_name: str, days: int, backend: str = DOCKER) -> dict:
-    return {
-        "schemaVersion": 1,
-        "plugin": "smoke",
-        "dir": f"evals/{dir_name}",
-        "backend": backend,
-        "startedAt": dated(days),
-        "outcome": "pass",
-    }
+def aged(dir_name: str, days: int) -> HistoryRecord:
+    return entry(dir=f"evals/{dir_name}", started_at=dated(days))
 
 
 def test_prune_drops_a_record_by_age_and_keeps_the_rest(tmp_path: Path) -> None:
@@ -235,9 +248,7 @@ def test_prune_reads_the_retention_the_way_the_log_prune_does(tmp_path: Path) ->
     than the run directory it names.
     """
     hour = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    entry = aged("plugin/one", 0)
-    entry["startedAt"] = hour
-    panel.append(tmp_path, [entry])
+    panel.append(tmp_path, [entry(started_at=hour)])
     file = panel.path(tmp_path, "smoke", "evals/plugin/one")
 
     directory = tmp_path / "runs" / f"{datetime.now() - timedelta(hours=1):%Y%m%d-%H%M%S}-smoke"
@@ -250,7 +261,7 @@ def test_prune_reads_the_retention_the_way_the_log_prune_does(tmp_path: Path) ->
 
 def test_prune_keeps_a_record_with_no_stamp(tmp_path: Path) -> None:
     """Nothing undatable is dropped: it would be a deletion on the age of nothing."""
-    panel.append(tmp_path, [{"schemaVersion": 1, "plugin": "smoke", "dir": "evals/plugin/one"}])
+    panel.append(tmp_path, [entry()])
     assert panel.prune(tmp_path, 30) == []
     assert len(panel.read(panel.path(tmp_path, "smoke", "evals/plugin/one"))[0]) == 1
 
@@ -258,14 +269,17 @@ def test_prune_keeps_a_record_with_no_stamp(tmp_path: Path) -> None:
 # The record, field by field.
 
 
-def written_document(tmp_path: Path, name: str, root: Path) -> Path:
+def written_document(
+    tmp_path: Path, name: str, root: Path | str, plugin_path: Path | str | None = None
+) -> Path:
     """One hand-written result document in a run directory, pointed at a real case tree."""
     run = tmp_path / "20260913-101010-smoke"
     (run / "smoke").mkdir(parents=True)
-    document = json.loads((DOCUMENTS / f"{name}.json").read_text())
-    document["suite"]["root"] = str(root)
-    document["suite"]["plugins"] = [{"name": "smoke", "path": str(root), "version": "0.1.0"}]
-    (run / "smoke" / RESULT_NAME).write_text(json.dumps(document))
+    document = ResultDocument.read(DOCUMENTS / f"{name}.json")
+    plugin = PluginRef(name="smoke", path=str(plugin_path or root), version="0.1.0")
+    suite = document.suite.model_copy(update={"root": str(root), "plugins": [plugin]})
+    written = document.model_copy(update={"suite": suite})
+    (run / "smoke" / RESULT_NAME).write_text(written.model_dump_json(by_alias=True))
     return run
 
 
@@ -281,15 +295,11 @@ def test_the_digest_is_read_from_this_hosts_tree_and_not_from_the_documents_root
     plugin was mounted at, `/work/plugin`. The case files the digest covers never move, so
     the sweep hands `records` the root it ran, and the digest is the tree's own.
     """
-    run = written_document(tmp_path, "pass", SMOKE)
-    document = json.loads((run / "smoke" / RESULT_NAME).read_text())
-    document["suite"]["root"] = CONTAINER_ROOT
-    document["suite"]["plugins"] = [{"name": "smoke", "path": CONTAINER_ROOT, "version": "0.1.0"}]
-    (run / "smoke" / RESULT_NAME).write_text(json.dumps(document))
+    run = written_document(tmp_path, "pass", CONTAINER_ROOT)
     decided = decide(run, found=3, picked=1)
 
     built = panel.records(run, decided.outcomes, DOCKER, roots={"smoke": SMOKE})
-    assert built[0]["caseDigest"] == panel.digest(SMOKE / "evals" / "plugin" / "python-version")
+    assert built[0].case_digest == panel.digest(SMOKE / "evals" / "plugin" / "python-version")
 
 
 def test_a_record_carries_no_digest_rather_than_the_digest_of_nothing(tmp_path: Path) -> None:
@@ -298,14 +308,11 @@ def test_a_record_carries_no_digest_rather_than_the_digest_of_nothing(tmp_path: 
     `sha256` over nothing is a valid-looking digest that differs from every real one, so a
     record carrying it would read `stale` forever over files nobody edited.
     """
-    run = written_document(tmp_path, "pass", SMOKE)
-    document = json.loads((run / "smoke" / RESULT_NAME).read_text())
-    document["suite"]["root"] = CONTAINER_ROOT
-    (run / "smoke" / RESULT_NAME).write_text(json.dumps(document))
+    run = written_document(tmp_path, "pass", CONTAINER_ROOT, plugin_path=SMOKE)
     decided = decide(run, found=3, picked=1)
 
     built = panel.records(run, decided.outcomes, DOCKER)
-    assert "caseDigest" not in built[0]
+    assert built[0].case_digest is None
     assert panel.digest(Path(CONTAINER_ROOT)) == panel.digest(tmp_path / "nothing-here")
 
 
@@ -318,42 +325,43 @@ def test_every_field_of_a_record_comes_from_the_document_it_was_built_from(
     built = panel.records(run, decided.outcomes, DOCKER, image="cowork-evals:abc")
 
     assert len(built) == 1
-    entry = built[0]
-    assert entry["schemaVersion"] == 1
-    assert entry["invocation"] == "20260913-101010-smoke"
-    assert entry["backend"] == DOCKER
-    assert entry["image"] == "cowork-evals:abc"
-    assert entry["plugin"] == "smoke"
-    assert entry["pluginVersion"] == "0.1.0"
-    assert entry["skill"] == "plugin"
-    assert entry["case"] == "python-version"
-    assert entry["dir"] == CASE_DIR
-    assert entry["outcome"] == "pass"
-    assert entry["score"] == 1.0
-    assert entry["passRate"] == 1.0
-    assert entry["runs"] == 1
-    assert entry["costUsd"] == 0.004
-    assert entry["startedAt"] == "2026-09-09T10:00:00+00:00"
-    assert entry["claudeVersion"] == "2.1.265"
+    record = built[0]
+    assert record.schema_version == 1
+    assert record.invocation == "20260913-101010-smoke"
+    assert record.backend == DOCKER
+    assert record.image == "cowork-evals:abc"
+    assert record.plugin == "smoke"
+    assert record.plugin_version == "0.1.0"
+    assert record.skill == "plugin"
+    assert record.case == "python-version"
+    assert record.dir == CASE_DIR
+    assert record.outcome == "pass"
+    assert record.score == 1.0
+    assert record.pass_rate == 1.0
+    assert record.runs == 1
+    assert record.cost_usd == 0.004
+    assert record.started_at == "2026-09-09T10:00:00+00:00"
+    assert record.claude_version == "2.1.265"
     # The digest is of the directory the suite root names, and what it covers is asserted
     # against a case tree above.
-    assert entry["caseDigest"] == panel.digest(SMOKE / CASE_DIR)
+    assert record.case_digest == panel.digest(SMOKE / CASE_DIR)
 
 
 def test_an_optional_field_is_absent_rather_than_null(tmp_path: Path) -> None:
     """The document carries no delta, no error and no trace, so the record carries none."""
     run = written_document(tmp_path, "pass", SMOKE)
-    entry = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
+    record = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
+    line = panel.append(tmp_path / "history", [record])[0].read_text()
     for absent in ("delta", "error", "failedGraders", "tracePath", "image", "deniedTools"):
-        assert absent not in entry
-    assert None not in entry.values()
+        assert f'"{absent}"' not in line
+    assert "null" not in line
 
 
 def test_a_failing_record_names_every_scored_grader_that_failed(tmp_path: Path) -> None:
     run = written_document(tmp_path, "structural_failures", SMOKE)
-    entry = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
-    assert entry["outcome"] == "fail"
-    assert entry["failedGraders"] == [
+    record = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
+    assert record.outcome == "fail"
+    assert record.failed_graders == [
         "says-alex",
         "fired-skill",
         "read-then-wrote",
@@ -363,33 +371,33 @@ def test_a_failing_record_names_every_scored_grader_that_failed(tmp_path: Path) 
 
 def test_a_record_carries_the_first_run_error(tmp_path: Path) -> None:
     run = written_document(tmp_path, "run_error", SMOKE)
-    entry = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
-    assert entry["outcome"] == "fail"
-    assert entry["error"]
+    record = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
+    assert record.outcome == "fail"
+    assert record.error
 
 
 def test_a_record_carries_the_validity_fields_traces_wrote(tmp_path: Path) -> None:
     run = written_document(tmp_path, "mode_denial", SMOKE)
-    entry = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
-    assert entry["deniedTools"]
+    record = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
+    assert record.denied_tools
 
 
 def test_a_declared_case_records_the_word_the_verdict_reached(tmp_path: Path) -> None:
     run = written_document(tmp_path, "declared_case", SMOKE)
-    entry = panel.records(run, decide(run, found=1, picked=1).outcomes, COWORK)[0]
-    assert entry["outcome"] == "declared"
-    assert entry["runs"] == 0
-    assert entry["durationSeconds"] == 0.0
+    record = panel.records(run, decide(run, found=1, picked=1).outcomes, COWORK)[0]
+    assert record.outcome == "declared"
+    assert record.runs == 0
+    assert record.duration_seconds == 0.0
 
 
 def test_a_two_arm_record_carries_the_delta_the_document_worked_out(tmp_path: Path) -> None:
     run = written_document(tmp_path, "two_arm", SMOKE)
     decided = decide(run, found=2, picked=2)
     built = panel.records(run, decided.outcomes, DOCKER)
-    assert [entry["case"] for entry in built] == ["fires-and-answers", "quiet-case"]
-    assert built[0]["delta"] == 1.0
-    assert built[0]["runs"] == 1
-    assert built[1]["delta"] == 0.0
+    assert [record.case for record in built] == ["fires-and-answers", "quiet-case"]
+    assert built[0].delta == 1.0
+    assert built[0].runs == 1
+    assert built[1].delta == 0.0
 
 
 def test_a_case_the_verdict_never_reached_produces_no_record(tmp_path: Path) -> None:
@@ -473,9 +481,10 @@ def test_a_row_whose_trace_directory_is_there_is_not_gone(tmp_path: Path) -> Non
     kept = tmp_path / "traces" / "python-version" / "run-1"
     kept.mkdir(parents=True)
     file = installed(tmp_path / "history", "stale")
-    lines = [json.loads(line) for line in file.read_text().splitlines()]
-    lines[0]["tracePath"] = str(kept / "trace.jsonl")
-    file.write_text(json.dumps(lines[0]) + "\n")
+    found, _ = panel.read(file)
+    file.unlink()
+    moved = found[0].model_copy(update={"trace_path": str(kept / "trace.jsonl")})
+    panel.append(tmp_path / "history", [moved])
     row = by_case(smoke_rows(tmp_path / "history")[0])["python-version"]
     assert row.gone is False
 
@@ -523,24 +532,10 @@ def test_the_snapshot_carries_one_entry_per_row_with_the_rows_values(tmp_path: P
     """The one assertion the renders need: every render is over the same rows."""
     installed(tmp_path, "two_backends")
     built, _ = smoke_rows(tmp_path)
-    document = json.loads(panel.snapshot(built))
+    document = PanelSnapshot.model_validate_json(panel.snapshot(built))
 
-    assert document["schemaVersion"] == 1
-    assert len(document["rows"]) == len(built)
-    for entry, row in zip(document["rows"], built, strict=True):
-        assert entry["plugin"] == row.plugin
-        assert entry["skill"] == row.skill
-        assert entry["case"] == row.case
-        assert entry["description"] == row.description
-        assert entry["dir"] == row.dir
-        assert entry["stale"] == row.stale
-        assert entry["records"] == row.records
-        assert entry.get("score") == row.score
-        assert entry.get("durationSeconds") == row.duration_seconds
-        assert entry.get("flake") == row.flake
-        for backend, cell in row.cells.items():
-            assert entry["backends"][backend]["outcome"] == cell.outcome
-            assert entry["backends"][backend].get("ageDays") == cell.age_days
+    assert document.schema_version == 1
+    assert document.rows == built
 
 
 def test_the_text_table_and_the_markdown_carry_one_line_per_row(tmp_path: Path) -> None:

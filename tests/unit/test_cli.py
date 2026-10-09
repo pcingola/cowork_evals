@@ -931,14 +931,22 @@ def test_prune_history_deletes_a_record_under_the_panel_root(tmp_path, capsys) -
     panel.append(
         history,
         [
-            {
-                "schemaVersion": 1,
-                "plugin": "smoke",
-                "dir": "evals/plugin/one",
-                "backend": "docker",
-                "startedAt": old,
-                "outcome": "pass",
-            }
+            panel.HistoryRecord(
+                schema_version=1,
+                invocation="20260903-090000-smoke",
+                backend="docker",
+                cowork_evals="0.4.0",
+                plugin="smoke",
+                case="one",
+                dir="evals/plugin/one",
+                outcome="pass",
+                score=1.0,
+                pass_rate=1.0,
+                runs=1,
+                duration_seconds=1.0,
+                cost_usd=0.0,
+                started_at=old,
+            )
         ],
     )
     config = settings(tmp_path, f"panel:\n  root: {history}\n")

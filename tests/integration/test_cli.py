@@ -374,12 +374,12 @@ def test_a_run_writes_a_record_the_panel_then_shows(credentialled, tmp_path, mon
     assert warnings == []
     assert len(records) == 1
     entry = records[0]
-    assert entry["backend"] == "docker"
-    assert entry["invocation"] == run.name
-    assert entry["image"] == credentialled.tag
-    assert entry["outcome"] == "pass"
-    assert entry["caseDigest"] == panel.digest(SMOKE / "evals" / "plugin" / "python-version")
-    assert Path(entry["tracePath"]).is_file()
+    assert entry.backend == "docker"
+    assert entry.invocation == run.name
+    assert entry.image == credentialled.tag
+    assert entry.outcome == "pass"
+    assert entry.case_digest == panel.digest(SMOKE / "evals" / "plugin" / "python-version")
+    assert entry.trace_path is not None and Path(entry.trace_path).is_file()
 
     capsys.readouterr()
     assert main(["panel", str(SMOKE)]) == 0
@@ -388,7 +388,7 @@ def test_a_run_writes_a_record_the_panel_then_shows(credentialled, tmp_path, mon
     row = next(line for line in printed.out.splitlines() if "python-version" in line)
     assert "pass 0d" in row
     assert "never run" in row
-    assert verdict.display(Path(entry["tracePath"]).parent) in row
+    assert verdict.display(Path(entry.trace_path).parent) in row
     # The four cases this run did not select have no record and say so. `python-version`
     # has a record on Docker and none on CoWork, so it carries one `never run` of its own.
     assert sum(1 for line in printed.out.splitlines() if "never run" in line) == 5

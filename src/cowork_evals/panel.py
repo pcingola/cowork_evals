@@ -22,10 +22,18 @@ import fcntl
 import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+)
 
 from .cases import (
     CASE_YAML,
@@ -40,7 +48,7 @@ from .cases import (
 from .harness import RESULT_NAME
 from .logs import distribution_version, slug
 from .preflight import BACKENDS, COWORK
-from .results import ARM_WITH, moment
+from .results import CaseEntry, PluginRef, ResultDocument, RunEntry, moment
 from .traces import DENIED, UNOFFERED
 from .verdict import OUTCOME_DECLARED, OUTCOME_PASS, CaseOutcome, display
 
@@ -88,43 +96,116 @@ COLUMNS = (
 DESCRIPTION_WIDTH = 40
 
 
-@dataclass(frozen=True, slots=True)
-class Cell:
+class _Model(BaseModel):
+    """A record of this module, read with its camelCase keys and written back with them.
+
+    A field that is `None` is absent from what is written, never null.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    @model_serializer(mode="wrap")
+    def _absent(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        written = handler(self)
+        for name, info in type(self).model_fields.items():
+            if getattr(self, name) is None:
+                written.pop(info.alias or name, None)
+                written.pop(name, None)
+        self._drop(written)
+        return written
+
+    def _drop(self, written: dict[str, Any]) -> None:
+        """Remove what else this record does not write. Nothing, unless a subclass says."""
+
+
+class HistoryRecord(_Model):
+    """One case of one invocation, as one line of that case's history file. docs/panel.md.
+
+    A field this model does not know is ignored on read: the contract is additive-only.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True, extra="ignore")
+
+    schema_version: int = Field(alias="schemaVersion")
+    invocation: str
+    backend: str
+    cowork_evals: str = Field(alias="coworkEvals")
+    plugin: str
+    case: str
+    dir: str
+    outcome: str
+    score: float
+    pass_rate: float = Field(alias="passRate")
+    runs: int
+    duration_seconds: float = Field(alias="durationSeconds")
+    cost_usd: float = Field(alias="costUsd")
+    case_digest: str | None = Field(default=None, alias="caseDigest")
+    started_at: str | None = Field(default=None, alias="startedAt")
+    claude_version: str | None = Field(default=None, alias="claudeVersion")
+    image: str | None = None
+    plugin_version: str | None = Field(default=None, alias="pluginVersion")
+    skill: str | None = None
+    delta: float | None = None
+    failed_graders: list[str] | None = Field(default=None, alias="failedGraders")
+    error: str | None = None
+    denied_tools: list[str] | None = Field(default=None, alias=DENIED)
+    unoffered_tools: list[str] | None = Field(default=None, alias=UNOFFERED)
+    trace_path: str | None = Field(default=None, alias="tracePath")
+
+
+class Cell(_Model):
     """One backend's latest record for one case: what it said, and how long ago.
 
     `age_days` is absent when there is no record, and on a case whose `no-cowork` tag makes
     the CoWork column `declared` without one.
     """
 
+    model_config = ConfigDict(populate_by_name=True, frozen=True, extra="forbid")
+
     outcome: str
-    age_days: int | None = None
+    age_days: int | None = Field(default=None, alias="ageDays")
 
 
-@dataclass(frozen=True, slots=True)
-class Row:
+class Row(_Model):
     """One case, as every render prints it.
 
     `cells` carries one entry per backend, always both, so a column is never missing. The five
     values after it come from the row's latest record, whichever backend produced it: the
     panel answers what is known about this case now, and that is the most recent measurement
     of it. `flake` is over that same backend's records for this case, and `records` is how many
-    they are.
+    they are. `gone` is written only beside `artefacts`.
     """
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True, extra="forbid")
 
     plugin: str
     skill: str
     case: str
     description: str
     dir: str
-    cells: dict[str, Cell] = field(default_factory=dict)
-    score: float | None = None
-    duration_seconds: float | None = None
-    flake: float | None = None
+    cells: dict[str, Cell] = Field(default_factory=dict, alias="backends")
     records: int = 0
     stale: bool = False
-    artefacts: str | None = None
-    gone: bool = False
     removed: bool = False
+    score: float | None = None
+    duration_seconds: float | None = Field(default=None, alias="durationSeconds")
+    flake: float | None = None
+    artefacts: str | None = None
+    gone: bool = Field(default=False, alias="artefactsGone")
+
+    def _drop(self, written: dict[str, Any]) -> None:
+        if self.artefacts is None:
+            written.pop("artefactsGone", None)
+            written.pop("gone", None)
+
+
+class PanelSnapshot(_Model):
+    """What `panel --json` writes: every row, every value as the row holds it."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True, extra="forbid")
+
+    schema_version: int = Field(alias="schemaVersion")
+    rows: list[Row]
 
 
 # The store.
@@ -151,7 +232,7 @@ def path(root: Path | str, plugin: str, case_dir: str) -> Path:
     return Path(root).joinpath(slug(plugin), *components[:-1], f"{components[-1]}{SUFFIX}")
 
 
-def append(root: Path | str, records: Sequence[dict[str, Any]]) -> list[Path]:
+def append(root: Path | str, records: Sequence[HistoryRecord]) -> list[Path]:
     """Write each record to the file its case owns, and return the files written.
 
     Records are grouped by file first, so one file is opened once however many of them it
@@ -161,8 +242,9 @@ def append(root: Path | str, records: Sequence[dict[str, Any]]) -> list[Path]:
     """
     written: dict[Path, list[str]] = {}
     for record in records:
-        file = path(root, str(record["plugin"]), str(record["dir"]))
-        written.setdefault(file, []).append(json.dumps(record, sort_keys=True))
+        file = path(root, record.plugin, record.dir)
+        line = json.dumps(record.model_dump(mode="json", by_alias=True), sort_keys=True)
+        written.setdefault(file, []).append(line)
     for file, lines in sorted(written.items()):
         file.parent.mkdir(parents=True, exist_ok=True)
         with file.open("a", encoding="utf-8") as handle:
@@ -171,7 +253,7 @@ def append(root: Path | str, records: Sequence[dict[str, Any]]) -> list[Path]:
     return sorted(written)
 
 
-def read(file: Path | str) -> tuple[list[dict[str, Any]], list[str]]:
+def read(file: Path | str) -> tuple[list[HistoryRecord], list[str]]:
     """Every record in one file, oldest first, and one line per record that did not parse.
 
     Appending is the only write, so file order is the order the records were made in and the
@@ -179,7 +261,10 @@ def read(file: Path | str) -> tuple[list[dict[str, Any]], list[str]]:
 
     A line that does not parse is reported and skipped rather than raising. A record is one
     line, so a truncated last line loses one measurement, and refusing the file for it would
-    lose every other measurement of that case.
+    lose every other measurement of that case. A line that parses and is not a record is
+    reported and skipped the same way. Its `schemaVersion` is read before the record is
+    validated, so a line of another version is reported as that and never as a field the other
+    version does not have.
     """
     file = Path(file)
     try:
@@ -189,7 +274,7 @@ def read(file: Path | str) -> tuple[list[dict[str, Any]], list[str]]:
     except OSError as error:
         return [], [f"{file}: unreadable: {error}"]
 
-    records: list[dict[str, Any]] = []
+    records: list[HistoryRecord] = []
     warnings: list[str] = []
     for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
@@ -208,8 +293,18 @@ def read(file: Path | str) -> tuple[list[dict[str, Any]], list[str]]:
                 f"{record.get('schemaVersion')!r}, and this module reads {SCHEMA_VERSION}"
             )
             continue
-        records.append(record)
+        try:
+            records.append(HistoryRecord.model_validate(record))
+        except ValidationError as error:
+            warnings.append(f"{file}: line {number}: invalid record: {_reason(error)}")
     return records, warnings
+
+
+def _reason(error: ValidationError) -> str:
+    """A validation error as one line: each field it names, and what is wrong with it."""
+    return "; ".join(
+        f"{'.'.join(str(part) for part in one['loc'])}: {one['msg']}" for one in error.errors()
+    )
 
 
 def digest(case_dir: Path | str) -> str:
@@ -255,7 +350,7 @@ def records(
     backend: str,
     image: str | None = None,
     roots: Mapping[str, Path] | None = None,
-) -> list[dict[str, Any]]:
+) -> list[HistoryRecord]:
     """One record per case of one invocation, from the documents that invocation wrote.
 
     It re-reads each `<plugin>/aggregate-result.json` rather than taking the documents from
@@ -276,16 +371,16 @@ def records(
     """
     directory = Path(run_dir)
     decided = {(one.plugin, one.dir): one.outcome for one in outcomes}
-    built: list[dict[str, Any]] = []
+    built: list[HistoryRecord] = []
     for child in sorted(item for item in directory.iterdir() if item.is_dir()):
-        document = _document(child / RESULT_NAME)
-        if document is None:
+        try:
+            document = ResultDocument.read(child / RESULT_NAME)
+        except (OSError, ValueError):
             continue
-        suite = document.get("suite") or {}
-        plugins = suite.get("plugins") or [{}]
-        root = Path((roots or {}).get(child.name) or str(suite.get("root") or child))
-        for case in document.get("cases") or []:
-            outcome = decided.get((child.name, str(case.get("dir") or "")))
+        suite = document.suite
+        root = Path((roots or {}).get(child.name) or suite.root or child)
+        for case in document.cases:
+            outcome = decided.get((child.name, case.dir))
             if outcome is None:
                 continue
             built.append(
@@ -293,7 +388,7 @@ def records(
                     case,
                     outcome=outcome,
                     document=document,
-                    plugin=plugins[0] if isinstance(plugins[0], dict) else {},
+                    plugin=suite.plugins[0] if suite.plugins else None,
                     fallback=child.name,
                     root=root,
                     invocation=directory.name,
@@ -304,68 +399,57 @@ def records(
     return built
 
 
-def _document(file: Path) -> dict[str, Any] | None:
-    try:
-        document = json.loads(file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return document if isinstance(document, dict) else None
-
-
 def _record(
-    case: dict[str, Any],
+    case: CaseEntry,
     *,
     outcome: str,
-    document: dict[str, Any],
-    plugin: dict[str, Any],
+    document: ResultDocument,
+    plugin: PluginRef | None,
     fallback: str,
     root: Path,
     invocation: str,
     backend: str,
     image: str | None,
-) -> dict[str, Any]:
+) -> HistoryRecord:
     """One case's record. An optional field is absent, never null. docs/panel.md.
 
     The plugin is the manifest name the document carries, which is not always the run
     directory's child name: two plugins of one manifest name get two run directories and
     share one history directory, because a history path has to be stable across invocations.
     """
-    where = str(case.get("dir") or "")
-    runs = [run for run in (case.get("arms") or {}).get(ARM_WITH) or [] if isinstance(run, dict)]
-    aggregates = case.get("aggregates") or {}
-
-    record: dict[str, Any] = {
-        "schemaVersion": SCHEMA_VERSION,
-        "invocation": invocation,
-        "backend": backend,
-        "coworkEvals": distribution_version(),
-        "plugin": str(plugin.get("name") or fallback),
-        "case": str(case.get("name") or ""),
-        "dir": where,
-        "outcome": outcome,
-        "score": _number(aggregates.get("score")),
-        "passRate": _number(aggregates.get("passRate")),
-        "runs": len(runs),
-        "durationSeconds": sum(_number(run.get("durationSeconds")) or 0.0 for run in runs),
-        "costUsd": sum(_number(run.get("judgeCostUsd")) or 0.0 for run in runs),
-    }
-    # Absent rather than the digest of nothing. A directory holding no file that defines a
-    # case is not the case's directory, and a digest over it would read as a real one and
-    # then differ from the tree at render time, which is a row that says `stale` about files
-    # nobody edited.
-    _put(record, "caseDigest", _case_digest(root / where))
-    _put(record, "startedAt", document.get("startedAt"))
-    _put(record, "claudeVersion", document.get("claudeVersion"))
-    _put(record, "image", image)
-    _put(record, "pluginVersion", plugin.get("version"))
-    _put(record, "skill", _skill(where))
-    _put(record, "delta", _number(aggregates.get("delta")))
-    _put(record, "failedGraders", _failed(runs))
-    _put(record, "error", next((run.get("error") for run in runs if run.get("error")), None))
-    _put(record, DENIED, _union(runs, DENIED))
-    _put(record, UNOFFERED, _union(runs, UNOFFERED))
-    _put(record, "tracePath", _trace(runs))
-    return record
+    runs = case.arms.with_
+    aggregates = case.aggregates
+    return HistoryRecord(
+        schema_version=SCHEMA_VERSION,
+        invocation=invocation,
+        backend=backend,
+        cowork_evals=distribution_version(),
+        plugin=(plugin.name if plugin is not None else "") or fallback,
+        case=case.name,
+        dir=case.dir,
+        outcome=outcome,
+        score=aggregates.score,
+        pass_rate=aggregates.pass_rate,
+        runs=len(runs),
+        duration_seconds=sum(run.duration_seconds or 0.0 for run in runs),
+        cost_usd=sum(run.judge_cost_usd for run in runs),
+        # Absent rather than the digest of nothing. A directory holding no file that defines
+        # a case is not the case's directory, and a digest over it would read as a real one
+        # and then differ from the tree at render time, which is a row that says `stale` about
+        # files nobody edited.
+        case_digest=_case_digest(root / case.dir),
+        started_at=document.started_at or None,
+        claude_version=document.claude_version or None,
+        image=image or None,
+        plugin_version=(plugin.version if plugin is not None else None) or None,
+        skill=_skill(case.dir),
+        delta=aggregates.delta,
+        failed_graders=_failed(runs) or None,
+        error=next((run.error for run in runs if run.error), None),
+        denied_tools=_union(run.denied_tools for run in runs) or None,
+        unoffered_tools=_union(run.unoffered_tools for run in runs) or None,
+        trace_path=_trace(runs),
+    )
 
 
 def _case_digest(case_dir: Path) -> str | None:
@@ -376,12 +460,6 @@ def _case_digest(case_dir: Path) -> str | None:
         return digest(case_dir)
     except OSError:
         return None
-
-
-def _put(record: dict[str, Any], key: str, value: Any) -> None:
-    """Write a field only when there is one. An optional field is absent, never null."""
-    if value not in (None, "", [], ()):
-        record[key] = value
 
 
 def _skill(where: str) -> str | None:
@@ -396,13 +474,7 @@ def _skill(where: str) -> str | None:
     return parts[0] if len(parts) > 1 else None
 
 
-def _number(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    return float(value)
-
-
-def _failed(runs: list[dict[str, Any]]) -> list[str]:
+def _failed(runs: list[RunEntry]) -> list[str]:
     """Every scored grader that did not pass, over the runs, each named once.
 
     Scored alone: a grader the harness dropped from the score decided nothing, and a skipped
@@ -410,38 +482,29 @@ def _failed(runs: list[dict[str, Any]]) -> list[str]:
     """
     names: list[str] = []
     for run in runs:
-        for result in run.get("graders") or []:
-            if not isinstance(result, dict) or not result.get("scored", True):
-                continue
-            name = result.get("name")
-            if not result.get("passed") and isinstance(name, str) and name not in names:
-                names.append(name)
+        for result in run.graders:
+            if result.scored and not result.passed and result.name not in names:
+                names.append(result.name)
     return names
 
 
-def _union(runs: list[dict[str, Any]], field_name: str) -> list[str]:
+def _union(fields: Iterable[list[str] | None]) -> list[str]:
     """One validity field over the runs, each tool named once. traces.py writes both."""
     tools: list[str] = []
-    for run in runs:
-        for tool in run.get(field_name) or []:
-            if str(tool) not in tools:
-                tools.append(str(tool))
+    for named in fields:
+        for tool in named or []:
+            if tool not in tools:
+                tools.append(tool)
     return tools
 
 
-def _trace(runs: list[dict[str, Any]]) -> str | None:
+def _trace(runs: list[RunEntry]) -> str | None:
     """Where to look first: the first failing run's trace, and the first run's when none
     failed. A person reading a red row wants the run that went wrong."""
     for run in runs:
-        if not run.get("passed") or run.get("error"):
-            named = run.get("tracePath")
-            if isinstance(named, str) and named:
-                return named
-    for run in runs:
-        named = run.get("tracePath")
-        if isinstance(named, str) and named:
-            return named
-    return None
+        if (not run.passed or run.error) and run.trace_path:
+            return run.trace_path
+    return next((run.trace_path for run in runs if run.trace_path), None)
 
 
 # The join.
@@ -481,7 +544,7 @@ def rows(
                 found, unparsable = read(file)
                 warnings += unparsable
                 if found:
-                    built.append(_removed_row(found, warnings))
+                    built.append(_removed_row(found))
     return built, warnings
 
 
@@ -512,20 +575,20 @@ def _retired(root: Path | str, plugin: str, plugin_root: Path, seen: set[Path]) 
         found, _ = read(file)
         if not found:
             continue
-        case_dir = Path(plugin_root) / str(found[-1].get("dir") or "")
+        case_dir = Path(plugin_root) / found[-1].dir
         if not (case_dir / PROMPT_FILE).is_file():
             retired.append(file)
     return retired
 
 
 def _row(
-    plugin: str, where: str, case: Case, found: list[dict[str, Any]], warnings: list[str]
+    plugin: str, where: str, case: Case, found: list[HistoryRecord], warnings: list[str]
 ) -> Row:
     """One case of the tree, with what each backend last said about it."""
     latest = {backend: _newest(found, backend) for backend in BACKENDS}
     cells = {backend: _cell(backend, latest[backend], case) for backend in BACKENDS}
     record = _most_recent(latest.values())
-    backend = str(record.get("backend")) if record else ""
+    backend = record.backend if record else ""
     try:
         description = case.frontmatter.description or ""
     except CaseError as error:
@@ -538,17 +601,17 @@ def _row(
         description=description,
         dir=where,
         cells=cells,
-        score=_number((record or {}).get("score")),
-        duration_seconds=_number((record or {}).get("durationSeconds")),
+        score=record.score if record else None,
+        duration_seconds=record.duration_seconds if record else None,
         flake=_flake(found, backend),
-        records=sum(1 for one in found if one.get("backend") == backend),
+        records=sum(1 for one in found if one.backend == backend),
         stale=_stale(case.directory, record, warnings),
         artefacts=_artefacts(record),
         gone=_gone(record),
     )
 
 
-def _removed_row(found: list[dict[str, Any]], warnings: list[str]) -> Row:
+def _removed_row(found: list[HistoryRecord]) -> Row:
     """One row for a case that is no longer in the tree, built from its own records.
 
     Nothing is read from the tree, so the description is the marker and the row is never
@@ -556,35 +619,34 @@ def _removed_row(found: list[dict[str, Any]], warnings: list[str]) -> Row:
     """
     latest = {backend: _newest(found, backend) for backend in BACKENDS}
     cells = {backend: _cell(backend, latest[backend], None) for backend in BACKENDS}
-    record = _most_recent(latest.values()) or {}
-    backend = str(record.get("backend") or "")
+    record = _most_recent(latest.values()) or found[-1]
     return Row(
-        plugin=str(record.get("plugin") or ""),
-        skill=str(record.get("skill") or ""),
-        case=str(record.get("case") or ""),
+        plugin=record.plugin,
+        skill=record.skill or "",
+        case=record.case,
         description=REMOVED,
-        dir=str(record.get("dir") or ""),
+        dir=record.dir,
         cells=cells,
-        score=_number(record.get("score")),
-        duration_seconds=_number(record.get("durationSeconds")),
-        flake=_flake(found, backend),
-        records=sum(1 for one in found if one.get("backend") == backend),
+        score=record.score,
+        duration_seconds=record.duration_seconds,
+        flake=_flake(found, record.backend),
+        records=sum(1 for one in found if one.backend == record.backend),
         artefacts=_artefacts(record),
         gone=_gone(record),
         removed=True,
     )
 
 
-def _newest(found: list[dict[str, Any]], backend: str) -> dict[str, Any] | None:
+def _newest(found: list[HistoryRecord], backend: str) -> HistoryRecord | None:
     """That backend's last record in the file, which is its newest: appending is the only
     write, so file order is the order the records were made in."""
     for record in reversed(found):
-        if record.get("backend") == backend:
+        if record.backend == backend:
             return record
     return None
 
 
-def _most_recent(latest: Iterable[dict[str, Any] | None]) -> dict[str, Any] | None:
+def _most_recent(latest: Iterable[HistoryRecord | None]) -> HistoryRecord | None:
     """The newest of the per-backend newest, by the stamp each carries.
 
     It is what the row's numbers come from: the panel answers what is known about the case
@@ -596,7 +658,7 @@ def _most_recent(latest: Iterable[dict[str, Any] | None]) -> dict[str, Any] | No
     return max(records, key=lambda record: (_when(record) or datetime.min).timestamp())
 
 
-def _cell(backend: str, record: dict[str, Any] | None, case: Case | None) -> Cell:
+def _cell(backend: str, record: HistoryRecord | None, case: Case | None) -> Cell:
     """One backend's column for one case.
 
     A case carrying `no-cowork` reads `declared` in the CoWork column whether or not it has
@@ -607,10 +669,10 @@ def _cell(backend: str, record: dict[str, Any] | None, case: Case | None) -> Cel
         return Cell(outcome=OUTCOME_DECLARED, age_days=_age(record))
     if record is None:
         return Cell(outcome=NEVER)
-    return Cell(outcome=str(record.get("outcome") or ""), age_days=_age(record))
+    return Cell(outcome=record.outcome, age_days=_age(record))
 
 
-def _age(record: dict[str, Any] | None) -> int | None:
+def _age(record: HistoryRecord | None) -> int | None:
     """How many days ago the record was made, from its own stamp."""
     when = _when(record)
     if when is None:
@@ -619,9 +681,9 @@ def _age(record: dict[str, Any] | None) -> int | None:
     return max((now - when).days, 0)
 
 
-def _when(record: dict[str, Any] | None) -> datetime | None:
-    started = (record or {}).get("startedAt")
-    if not isinstance(started, str) or not started:
+def _when(record: HistoryRecord | None) -> datetime | None:
+    started = record.started_at if record else None
+    if not started:
         return None
     try:
         return moment(started)
@@ -629,7 +691,7 @@ def _when(record: dict[str, Any] | None) -> datetime | None:
         return None
 
 
-def _flake(found: list[dict[str, Any]], backend: str) -> float | None:
+def _flake(found: list[HistoryRecord], backend: str) -> float | None:
     """How often that backend's records of this case passed.
 
     A declared record is out of it: the backend was told it could not run the case, and a
@@ -638,39 +700,39 @@ def _flake(found: list[dict[str, Any]], backend: str) -> float | None:
     ran = [
         record
         for record in found
-        if record.get("backend") == backend and record.get("outcome") != OUTCOME_DECLARED
+        if record.backend == backend and record.outcome != OUTCOME_DECLARED
     ]
     if not ran:
         return None
-    return sum(1 for record in ran if record.get("outcome") == OUTCOME_PASS) / len(ran)
+    return sum(1 for record in ran if record.outcome == OUTCOME_PASS) / len(ran)
 
 
-def _stale(directory: Path, record: dict[str, Any] | None, warnings: list[str]) -> bool:
+def _stale(directory: Path, record: HistoryRecord | None, warnings: list[str]) -> bool:
     """Whether the case files have changed since the record was made.
 
     The digest is recomputed from the tree and compared with the one the record carries. A
     row that is stale is green over files that are not the files there now.
     """
-    if not record or not record.get("caseDigest"):
+    if not record or not record.case_digest:
         return False
     try:
-        return digest(directory) != record["caseDigest"]
+        return digest(directory) != record.case_digest
     except OSError as error:
         warnings.append(f"{directory}: unreadable case: {error}")
         return False
 
 
-def _artefacts(record: dict[str, Any] | None) -> str | None:
+def _artefacts(record: HistoryRecord | None) -> str | None:
     """The directory the record's trace is in, named the way a failure line names it."""
-    named = (record or {}).get("tracePath")
-    if not isinstance(named, str) or not named:
+    named = record.trace_path if record else None
+    if not named:
         return None
     return display(Path(named).parent)
 
 
-def _gone(record: dict[str, Any] | None) -> bool:
-    named = (record or {}).get("tracePath")
-    if not isinstance(named, str) or not named:
+def _gone(record: HistoryRecord | None) -> bool:
+    named = record.trace_path if record else None
+    if not named:
         return False
     return not Path(named).parent.is_dir()
 
@@ -706,43 +768,8 @@ def snapshot(built: Sequence[Row]) -> str:
     It is the render a script reads, so nothing is cut, padded or formatted: a number is a
     number and an absent one is absent.
     """
-    document = {
-        "schemaVersion": SCHEMA_VERSION,
-        "rows": [_entry(row) for row in built],
-    }
-    return json.dumps(document, indent=2) + "\n"
-
-
-def _entry(row: Row) -> dict[str, Any]:
-    entry: dict[str, Any] = {
-        "plugin": row.plugin,
-        "skill": row.skill,
-        "case": row.case,
-        "description": row.description,
-        "dir": row.dir,
-        "backends": {
-            backend: _backend_entry(row.cells[backend])
-            for backend in BACKENDS
-            if backend in row.cells
-        },
-        "records": row.records,
-        "stale": row.stale,
-        "removed": row.removed,
-    }
-    _put(entry, "score", row.score)
-    _put(entry, "durationSeconds", row.duration_seconds)
-    _put(entry, "flake", row.flake)
-    if row.artefacts is not None:
-        entry["artefacts"] = row.artefacts
-        entry["artefactsGone"] = row.gone
-    return entry
-
-
-def _backend_entry(cell: Cell) -> dict[str, Any]:
-    entry: dict[str, Any] = {"outcome": cell.outcome}
-    if cell.age_days is not None:
-        entry["ageDays"] = cell.age_days
-    return entry
+    document = PanelSnapshot(schema_version=SCHEMA_VERSION, rows=list(built))
+    return json.dumps(document.model_dump(mode="json", by_alias=True), indent=2) + "\n"
 
 
 def _cells(row: Row, width: int | None = None) -> list[str]:
@@ -788,8 +815,8 @@ def prune(root: Path | str, days: int) -> list[Path]:
     moves that time, and a case nobody has looked at is not younger than one somebody has.
 
     A file left with no record is deleted, and every directory that leaves empty is deleted
-    after it, up to the history root, which stays. A record with no stamp and a line that did
-    not parse are both kept: neither can be dated, and dropping what cannot be dated would
+    after it, up to the history root, which stays. A record with no stamp and a line that is
+    not a record are both kept: neither can be dated, and dropping what cannot be dated would
     delete a measurement on the age of nothing.
     """
     root = Path(root)
@@ -826,10 +853,8 @@ def _older(line: str, now: datetime, days: int) -> bool:
     record for a day longer than the run directory it names.
     """
     try:
-        record = json.loads(line)
+        record = HistoryRecord.model_validate_json(line)
     except ValueError:
-        return False
-    if not isinstance(record, dict):
         return False
     when = _when(record)
     if when is None:

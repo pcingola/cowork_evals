@@ -118,7 +118,7 @@ writes exactly the keys and values the module writes today, except where `plan_m
 - [x] `traces.py`: `TraceRecord`, and the result document read and rewritten as `ResultDocument`.
 - [x] `checks.py`: `Outcome` and `JudgeCall` as `plan_models.md` gives them, and the result document read and rewritten as `ResultDocument`.
 - [x] `verdict.py` reads `ResultDocument`.
-- [ ] `panel.py`: `HistoryRecord`, `PanelSnapshot`, `Row`, `Cell`, and the result document read as `ResultDocument`.
+- [x] `panel.py`: `HistoryRecord`, `PanelSnapshot`, `Row`, `Cell`, and the result document read as `ResultDocument`.
 - [ ] `logs.py`: `RunEnvironment`.
 - [ ] `config.py`: `Config.dump(path)`, with `Config.load(path) == config` for every `Config` the tests build.
 - [ ] `docker/__init__.py`: `Unmet`, `Image`, `Credentials`, `OAuth`. `preflight.py` and `docker/pytest_image.py` take `Unmet`.
