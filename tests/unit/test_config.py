@@ -13,6 +13,8 @@ import pytest
 
 from cowork_evals.config import (
     CONFIG_FILENAME,
+    CONSENT_NONE,
+    CREDENTIAL_BEDROCK,
     Config,
     CoWorkError,
     CoWorkSection,
@@ -128,6 +130,29 @@ def test_every_section_is_read_from_one_file(tmp_path: Path) -> None:
     assert config.eval.allow_tools == ("Bash", "Write")
     assert config.docker.platform == "linux/amd64"
     assert config.panel.root == Path("/elsewhere/history")
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        Config(),
+        Config(cowork=CoWorkSection(profile="Fixture", consent=CONSENT_NONE, log_dir=None)),
+        Config(eval=EvalSection(model="opus", allow_tools=("Bash", "Write"))),
+        Config(eval=EvalSection(keep_traces=False, max_cost_usd=2.5, ablation="with-without")),
+        Config(
+            docker=DockerSection(
+                credential=CREDENTIAL_BEDROCK,
+                extra_ca_file=Path("/etc/ca.pem"),
+                env_passthrough=("ACME_API_KEY",),
+            )
+        ),
+        Config(panel=PanelSection(root=Path("/elsewhere/history"))),
+    ],
+)
+def test_a_dumped_configuration_loads_back_equal(tmp_path: Path, config: Config) -> None:
+    file = tmp_path / CONFIG_FILENAME
+    config.dump(file)
+    assert Config.load(file) == config
 
 
 def test_a_section_the_file_omits_is_the_default(tmp_path: Path) -> None:
