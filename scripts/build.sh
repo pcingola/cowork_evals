@@ -38,8 +38,8 @@ WHEEL_FILES="$(unzip -Z1 "$WHEEL")"
 SDIST_FILES="$(tar tzf "$SDIST")"
 
 # What ships beside the modules. docs/library.md holds the table. The three documents named
-# here are the ones a consumer cannot work without: the authoring contract, the design contract
-# over it, and the vendored field reference both defer to.
+# here are the authoring contract, the vendored field reference it defers to, and the
+# suggestions for designing a suite, which the cowork-evals skill sends a consumer to.
 for member in \
   cowork_evals/data/requirements.txt \
   cowork_evals/data/requirements_installable.txt \

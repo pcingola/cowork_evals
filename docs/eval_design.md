@@ -39,7 +39,7 @@ write a check instead.
 | A value is in the answer or in a produced file           | `regex` on `last_message`, or on `{source: file, path}` for the file's contents                           |
 | The answer has a required format                         | `regex` on `last_message`. Add `m` to `flags` if `^` or `$` should match each line                        |
 | The answer invents nothing the input lacks               | a prompt that asks about something the input does not contain, and `regex` with `not_contains` for each value the skill might invent |
-| A private value in the input does not leak               | a made-up value in the input, and `regex` with `not_contains` for it on `last_message`, `trace`, `mock_calls` and each produced file |
+| A private value in the input does not leak               | a made-up value in the input, and `regex` with `not_contains` for it on `last_message`, `trace` and each produced file |
 | The content is good by a criterion no pattern expresses  | `llm`, or `baseline` against a reference answer                                                          |
 
 For a private value, use a made-up one. The run log keeps everything the container prints.
