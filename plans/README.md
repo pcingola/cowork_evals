@@ -16,8 +16,7 @@ while the work happens.
 
 ## Plans
 
-Nineteen plans. Seventeen build something and are numbered in build order, and one of those
-sixteen is skipped. `plan_fix` builds nothing, so it carries no number: it corrects what the
+Plans that build something are numbered in build order, and one of them is skipped. `plan_fix` builds nothing, so it carries no number: it corrects what the
 others wrote, and it ran before `plan_cowork_backend.md` because it changes what that plan and
 `plan_cli.md` both read. `plan_believable_results` carries no number for the same reason:
 it holds measurements and decisions, and its product is the four plans numbered 10 to 13. The order is the
@@ -48,6 +47,7 @@ not the system's: what is built and usable is
 | 15 | [`done/plan_consent.20260913.md`](done/plan_consent.20260913.md) | The keyboard consent dialog, shown by the driver rather than by a caller | implemented | `fix/consent` |
 | 16 | [`plan_artifact_checks.md`](plan_artifact_checks.md) | An assertion an author writes as code, deciding the run beside the harness's graders | written | `feat/artifact-checks` |
 | 17 | [`done/plan_session_env.20260923.md`](done/plan_session_env.20260923.md) | A Docker run's `Bash` calls see only the CoWork session environment | implemented | `feat/session-env` |
+| 18 | [`plan_tests.md`](plan_tests.md) | Typed models across the package, and a test suite where each test checks one stated requirement. Per-file decisions in [`plan_tests/`](plan_tests), models in [`plan_models.md`](plan_models.md) | written | `feat/typed-tests` |
 
 | Status        | Means                                                                     |
 | ------------- | --------------------------------------------------------------------------- |
