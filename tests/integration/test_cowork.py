@@ -102,7 +102,7 @@ def test_focus_the_guard_refuses_with_code_9_when_cowork_is_not_frontmost(activa
 @pytest.mark.integration
 @pytest.mark.live
 @pytest.mark.timeout(1800)
-def test_focus_a_primed_composer_is_cleared_before_the_prompt(attended: Path, activate) -> None:
+def test_focus_a_primed_composer_is_cleared_before_the_prompt(attended: Config, activate) -> None:
     """The composer contamination, reproduced and then not reproduced.
 
     The composer is primed by typing into it, which is what a developer working in another
@@ -110,7 +110,7 @@ def test_focus_a_primed_composer_is_cleared_before_the_prompt(attended: Path, ac
     has to be the submitted prompt and nothing else.
     """
     real_profile()
-    driver = CoWork.from_file(attended)
+    driver = CoWork(attended.cowork)
 
     activate(driver_module.COWORK_PROCESS)
     assert driver_module.frontmost() == driver_module.COWORK_PROCESS
@@ -143,7 +143,7 @@ def test_focus_a_primed_composer_is_cleared_before_the_prompt(attended: Path, ac
 @pytest.mark.integration
 @pytest.mark.live
 @pytest.mark.timeout(1800)
-def test_a_live_run_returns_the_marker(attended: Path) -> None:
+def test_a_live_run_returns_the_marker(attended: Config) -> None:
     """It also proves the driver asks for the keyboard rather than refusing.
 
     `attended` carries `consent: dialog` and this test calls `run` directly, with no caller
@@ -154,7 +154,7 @@ def test_a_live_run_returns_the_marker(attended: Path) -> None:
     `keyboard` fixture `attended` requests has already asked by then.
     """
     real_profile()
-    driver = CoWork.from_file(attended)
+    driver = CoWork(attended.cowork)
     assert driver.config.consent == CONSENT_DIALOG
     marker = f"MARKER-{uuid.uuid4().hex[:12].upper()}"
     before = len(driver.sessions())

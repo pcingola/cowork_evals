@@ -34,7 +34,7 @@ from cowork_evals import Config, checks, logs, panel, preflight, traces, verdict
 from cowork_evals.cli import main
 from cowork_evals.config import CONFIG_FILENAME
 from cowork_evals.docker import Condition, Docker, remedy
-from cowork_evals.docker.pytest_image import BUILD_REMEDY, PytestImage
+from cowork_evals.docker.pytest_image import PytestImage
 from cowork_evals.harness import RESULT_NAME
 from cowork_evals.preflight import COWORK
 
@@ -44,22 +44,6 @@ SMOKE = ROOT / "plugins" / "smoke"
 # What `run --docker` prints into `run.log` from inside the container. It is the harness's
 # own first line, so a line here proves the tee reached a child process.
 HARNESS_LINE = "Plugin under test:"
-
-
-@pytest.fixture(scope="session")
-def images() -> PytestImage:
-    """Both images and the daemon, asserted once. Nothing here builds either."""
-    configured = PytestImage()
-    assert configured.docker.daemon_is_reachable(), (
-        f"docker daemon is not reachable: {remedy(Condition.DAEMON)}"
-    )
-    assert configured.docker.image_is_present(), (
-        f"{configured.docker.tag} is absent: {remedy(Condition.IMAGE)}, which no test here runs"
-    )
-    assert configured.image_is_present(), (
-        f"{configured.tag} is absent: {BUILD_REMEDY}, which no test here runs"
-    )
-    return configured
 
 
 @pytest.fixture
@@ -415,27 +399,27 @@ def cowork_ready() -> None:
 
 @pytest.mark.live
 def test_one_ask_prints_a_non_empty_answer_and_names_a_session_that_exists(
-    cowork_ready, attended: Path, monkeypatch, capsys
+    cowork_ready, attended: Config, working_directory, tmp_path: Path, capsys
 ) -> None:
     """One submission, one printed answer, and no run directory anywhere.
 
     It calls `main` rather than the executable, so the footer is read off the two streams
     this command wrote rather than out of a subprocess's buffers. `main` reads the
-    configuration file in the working directory, so the working directory is the one the
-    `attended` fixture wrote its file into, exactly as a consumer runs the command from a
-    directory holding one. The `keyboard` fixture has already asked, so this submission
-    shows nothing.
+    configuration file in the working directory, so the `attended` configuration is written
+    into a new one, exactly as a consumer runs the command from a directory holding one. The
+    `keyboard` fixture has already asked, so this submission shows nothing.
     """
-    monkeypatch.chdir(attended.parent)
-    before = sorted(ROOT.iterdir())
-    assert main(["ask", "--cowork", ASK_PROMPT]) == 0
+    attended.dump(tmp_path / CONFIG_FILENAME)
+    before = sorted(tmp_path.iterdir())
+    with working_directory(tmp_path):
+        assert main(["ask", "--cowork", ASK_PROMPT]) == 0
     printed = capsys.readouterr()
 
     assert MARKER in printed.out
     named = [line for line in printed.err.splitlines() if line.startswith("session: ")]
     assert len(named) == 1
     assert Path(named[0].removeprefix("session: ")).is_dir()
-    assert sorted(ROOT.iterdir()) == before
+    assert sorted(tmp_path.iterdir()) == before
 
 
 # Environment passthrough. docs/docker.md.
