@@ -12,7 +12,8 @@ and `cowork_evals docs` prints where those files landed in the install.
 
 The names exported below are the driver and the configuration, which are the only parts a
 consumer imports rather than reaching through the command. The driver's behaviour is
-docs/cowork_driver.md and the application internals it couples to are docs/cowork_desktop.md.
+docs/cowork_driver.md, its API is docs/cowork_driver_internals.md, and the application
+internals it couples to are docs/cowork_desktop.md.
 """
 
 from .config import (

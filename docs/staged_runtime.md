@@ -7,7 +7,7 @@
 `claude plugin eval` on the developer's own host against a Python 3.10 interpreter carrying the
 CoWork wheel set, staged into the plugin directory under test. The developer decided not to
 build it, and the file is kept so the design and the measurements behind it are not redone from
-scratch if that decision changes. The status row is in [running_evals.md](running_evals.md).
+scratch if that decision changes. The status row is in [status.md](status.md).
 
 The three things worth keeping from it:
 

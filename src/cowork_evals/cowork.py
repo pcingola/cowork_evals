@@ -1,7 +1,7 @@
 """The CoWork driver: submit one prompt, wait for the run, collect what it produced.
 
-The behaviour is docs/cowork_driver.md and the record shapes are docs/cowork_desktop.md. Nothing
-here writes anywhere under the CoWork profile.
+The behaviour is docs/cowork_driver.md, the design is docs/cowork_driver_internals.md, and the
+record shapes are docs/cowork_desktop.md. Nothing here writes anywhere under the CoWork profile.
 """
 
 from __future__ import annotations
@@ -107,7 +107,7 @@ CONSENT_MESSAGE = (
 
 # One process, one operator, one keyboard. `CoWorkSection` is frozen and
 # `cowork_backend._run_case` builds a new `CoWork` per case, so neither can carry this and
-# a 20-case suite would ask 20 times. docs/cowork_driver.md.
+# a 20-case suite would ask 20 times. docs/cowork_driver_internals.md.
 _CONSENTED = False
 
 # How often a poll looks at the filesystem. Not configurable: the timeouts are.

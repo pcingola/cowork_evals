@@ -1,7 +1,7 @@
 """The `claude plugin eval` command line, built once for both Claude Code backends.
 
-Every flag emitted here is pinned in docs/running_evals.md, and the harness behind them is
-docs/plugin_eval.md. The venv backend reuses this unchanged; only the host differs.
+Every flag emitted here is pinned in docs/run_pipeline.md, and the harness behind them is
+docs/docker.md. The venv backend reuses this unchanged; only the host differs.
 
 Both paths arrive already resolved for the host the harness runs on, so the container backend
 passes container paths and nothing here resolves one.
@@ -15,7 +15,7 @@ from pathlib import Path
 from .config import Config
 
 # The debug log's name inside the run's output directory. The log layout fixes it.
-# docs/running_evals.md.
+# docs/running_evals.md, docs/run_pipeline.md.
 DEBUG_FILE_NAME = "debug.txt"
 
 # The result document's name in the same directory, from the same layout. Every backend
@@ -25,12 +25,12 @@ RESULT_NAME = "aggregate-result.json"
 
 # The early-access enablement variable, as `--env` takes it. The package exports it into
 # the child, and no developer chooses it, so it is a constant and not a setting.
-# docs/plugin_eval.md.
+# docs/docker.md.
 ENABLEMENT_ENV = "CLAUDE_CODE_WALNUT_SPIRE=1"
 
 # The one pinned flag with no option and no setting. `--threshold 0` hands pass and fail to
 # the verdict in verdict.py, which is also where the number a two-arm run is decided on
-# lives: `eval.delta_threshold`, read there and never emitted here. docs/running_evals.md.
+# lives: `eval.delta_threshold`, read there and never emitted here. docs/run_pipeline.md.
 THRESHOLD = "0"
 
 
@@ -72,7 +72,7 @@ class RunOptions:
 
         `ablation` is `eval.ablation`, and the value it resolves to is the flag emitted.
         The number a two-arm run is decided on is not here: it is never emitted, and
-        `verdict.py` reads it. docs/running_evals.md.
+        `verdict.py` reads it. docs/run_pipeline.md.
         """
         settings = (config if config is not None else Config.load()).eval
         return cls(
@@ -93,7 +93,7 @@ def eval_argv(target: Path | str, output_dir: Path | str, options: RunOptions) -
 
     `--debug-file` goes before `plugin`, and never a bare `--debug`, which swallows the
     subcommand name as its filter. `--json` is never emitted, for the reason in
-    docs/plugin_eval.md.
+    docs/docker.md.
     """
     output_dir = Path(output_dir)
     argv = [

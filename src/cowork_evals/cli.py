@@ -279,7 +279,7 @@ def _login_parser(verbs: Any) -> None:
     `--check` reports and writes nothing. `--force` logs in again over a login this package
     already accepts, which is tokens that are present and no longer work, or the wrong
     account. A credentials file carrying no token is not a login, and needs no flag.
-    docs/cli.md.
+    docs/cli.md, docs/cli_design.md.
     """
     verb = verbs.add_parser("login", help="log in to Claude Code once, in a container")
     _backend_group(verb, DOCKER)
@@ -508,7 +508,8 @@ def _run(args: argparse.Namespace, config: Config) -> int:
     and `cowork_backend.plan` reads the case tree and the configuration. Gating a filesystem
     check on a running daemon is the one thing that stopped a consumer without Docker from
     checking a case at all. The ceiling is part of that preflight, and a dry run on
-    `--cowork` prints the same arithmetic instead of refusing on it. docs/cli.md.
+    `--cowork` prints the same arithmetic instead of refusing on it. docs/cli.md,
+    docs/cli_design.md.
     """
     try:
         roots = plugin_roots(args.path)
@@ -776,7 +777,7 @@ def _record(
 
     A failure to write is a warning on stderr and leaves the exit code alone. Recording a
     result is not deciding one, and an unwritable history root must not turn a passing run
-    red. docs/panel.md.
+    red. docs/case_history.md.
     """
     try:
         panel.append(
@@ -1039,7 +1040,7 @@ def _test(args: argparse.Namespace, config: Config) -> int:
     if args.dry_run:
         # Before the preflight, unlike `run --dry-run`, which prunes the log root and so
         # must not act behind a failed one. This prints an argument list and does nothing
-        # else, so there is nothing for a preflight to guard. docs/cli.md.
+        # else, so there is nothing for a preflight to guard. docs/cli_design.md.
         for argument in image.run_argv(args.path, pytest_args=tail):
             print(argument)
         return OK
@@ -1063,7 +1064,7 @@ def _setup(config: Config) -> int:
 
     It does not log in. Building an image and obtaining a credential are two things, and
     `login` is the verb that does the second: a machine whose login was revoked needs that
-    one act and not a second pass over two images that are already current. docs/cli.md.
+    one act and not a second pass over two images that are already current. docs/cli_design.md.
     """
     image = Docker(config)
     test_image = PytestImage(config)
@@ -1161,8 +1162,8 @@ def _docs(args: argparse.Namespace) -> int:
     """Print where the shipped documentation is, or the path of one document.
 
     It reads nothing but the filesystem, writes nothing, and needs no configuration and no
-    backend. A consumer's Claude Code session runs it to find the authoring contract, so
-    what it prints is paths and names and never prose. docs/cli.md.
+    backend. What it prints is paths and names and never prose, so a script can use it.
+    docs/cli.md, docs/cli_design.md.
     """
     names = resources.documents()
     if not names:
@@ -1326,7 +1327,7 @@ def _prune_images(config: Config, days: int) -> None:
     """Every tag of both repositories except the current digest of each.
 
     The container login is left alone: it is a credential, not a build product, and
-    deleting it forces an interactive login. docs/cli.md.
+    deleting it forces an interactive login. docs/cli_design.md.
     """
     current = {Docker(config).tag, PytestImage(config).tag}
     cutoff = datetime.now().astimezone() - timedelta(days=days)

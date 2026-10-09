@@ -2,7 +2,7 @@
 
 Every run of either backend leaves the same three names, so a case is read the same way
 whichever backend produced it. What differs is only where they are read from, and that is
-`_source` below. docs/running_evals.md.
+`_source` below. docs/running_evals.md, docs/run_pipeline.md.
 
 | Backend    | The artefacts are in                       | And are |
 | ---------- | ------------------------------------------ | ------- |
@@ -78,7 +78,7 @@ DENIED = "deniedTools"
 UNOFFERED = "unofferedTools"
 
 # The two records the checks read, from docs/claude_code/plugin_eval_reference.md and the
-# snapshots in docs/running_evals.md.
+# facts in docs/run_pipeline.md.
 SYSTEM = "system"
 INIT = "init"
 PERMISSION_DENIED = "permission_denied"
@@ -229,7 +229,7 @@ def unoffered_tools(records: list[dict[str, Any]], granted: tuple[str, ...]) -> 
     be written `WebFetch(domain:example.com)`, and the reference records that a bare `Read`,
     `Glob` or `Grep` reaches the child path-scoped, so a literal comparison would report a run
     as missing a tool it had. Every granted name arrives in the list bare, which
-    docs/running_evals.md records, so no name needs excluding from the comparison.
+    docs/run_pipeline.md records, so no name needs excluding from the comparison.
     """
     offered = _offered(records)
     if offered is None:

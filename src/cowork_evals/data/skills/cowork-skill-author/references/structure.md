@@ -35,7 +35,7 @@ Four properties of this tree:
   plugin's skills, and one eval directory per skill makes a per-skill selection match the tree.
   A listing of the skill directory shows neither, so a skill can look complete and have neither.
 - **The wrapper resolves its own directory.** A skill's `scripts/<skill>.sh` derives its paths
-  from `$0` and never from an environment variable that may be unset. See `cli.md`.
+  from `$0` and never from an environment variable that may be unset. See `wrapper.md`.
 - **A skill never links outside its own directory.** The skill is read where it is installed. A
   path that walks up out of the skill resolves in the authoring tree and nowhere else.
 

@@ -12,6 +12,7 @@ checkout and dangles in an install, so nothing at run time can see it. See ../RE
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -168,40 +169,72 @@ def test_the_memory_block_carries_its_own_marker() -> None:
     assert resources.MEMORY_MARKER in resources.MEMORY_BLOCK
 
 
-# The skill against the documents it condenses. docs/library.md.
+# The skills against the documents. docs/library.md.
 
 
-def _traps(text: str, start: str, end: str | None) -> list[str]:
-    body = text[text.index(start) :]
-    if end is not None:
-        body = body[: body.index(end)]
-    return [line for line in body.splitlines() if line.startswith("- ")]
+def test_no_skill_file_sends_the_reader_to_the_documentation() -> None:
+    """A skill names its own references. The documentation verb and `docs/` are for people."""
+    offenders = [
+        directory.name
+        for directory, _ in resources.skills()
+        for text in [(directory / resources.SKILL_FILE).read_text()]
+        if "cowork_evals docs" in text or "docs/" in text
+    ]
+    assert offenders == []
 
 
-def test_the_skill_carries_every_grader_type_the_format_defines() -> None:
-    """The skill states no fact of its own, so a type in one is a type in the other."""
-    skill = resources.skill("cowork-evals").read_text()
-    fmt = (resources.docs_dir() / "eval_format.md").read_text()
-    for grader in ("regex", "tool_used", "tool_order", "file_exists", "llm", "baseline"):
-        assert f"`{grader}`" in skill, grader
-        assert f"`{grader}`" in fmt, grader
+# A reference a skill names, as `references/<file>`.
+REFERENCE = re.compile(r"`references/([\w.-]+)`")
 
 
-def test_the_skill_carries_as_many_traps_as_the_format() -> None:
-    """A trap added to one and not the other is the drift this rule exists to stop."""
-    skill = resources.skill("cowork-evals").read_text()
-    fmt = (resources.docs_dir() / "eval_format.md").read_text()
-    assert len(_traps(skill, "## Traps", "## The exit codes")) == len(
-        _traps(fmt, "## Authoring traps", None)
-    )
+def test_every_reference_a_skill_names_is_there() -> None:
+    """Including the ones a symlink provides, which must resolve to a file."""
+    missing = [
+        f"{directory.name}: {name}"
+        for directory, _ in resources.skills()
+        for name in REFERENCE.findall((directory / resources.SKILL_FILE).read_text())
+        if not (directory / "references" / name).is_file()
+    ]
+    assert missing == []
 
 
-def test_the_skill_sends_the_reader_to_the_docs_verb() -> None:
-    """Everything it does not carry is one command away, and it has to say which."""
-    skill = resources.skill("cowork-evals").read_text()
-    assert "cowork_evals docs" in skill
-    for name in ("eval_format", "cli", "runtime"):
-        assert f"docs {name}" in skill, name
+def test_every_reference_a_skill_holds_is_named_by_its_skill_file() -> None:
+    """A reference no `SKILL.md` names is never loaded."""
+    unnamed = []
+    for directory, _ in resources.skills():
+        text = (directory / resources.SKILL_FILE).read_text()
+        for path in sorted((directory / "references").glob("*")):
+            if f"references/{path.name}" not in text:
+                unnamed.append(f"{directory.name}: {path.name}")
+    assert unnamed == []
+
+
+def test_a_reference_that_shares_a_document_name_is_a_link_to_it() -> None:
+    """A fact has one home. A reference named for a document is that document, never a copy."""
+    root = resources.docs_dir()
+    assert root is not None
+    copies = [
+        f"{directory.name}: {path.name}"
+        for directory, _ in resources.skills()
+        for path in sorted((directory / "references").glob("*"))
+        if (root / path.name).exists() and path.resolve() != (root / path.name).resolve()
+    ]
+    assert copies == []
+
+
+def test_every_link_in_a_reference_stays_inside_its_skill() -> None:
+    """A document a skill links is read from the skill's `references/`, so a sibling link has
+    to resolve there as well as in `docs/`."""
+    broken = []
+    for directory, _ in resources.skills():
+        references = directory / "references"
+        for path in sorted(references.glob("*.md")):
+            for target in _links(path):
+                if target.startswith(("http://", "https://", "#")):
+                    continue
+                if not (references / target.split("#", 1)[0]).is_file():
+                    broken.append(f"{directory.name}/{path.name}: {target}")
+    assert broken == []
 
 
 # R1 and R2. docs/library.md.
@@ -247,7 +280,9 @@ def test_r2_no_document_links_out_of_the_tree() -> None:
         for target in _links(path):
             if target.startswith(("http://", "https://", "#")):
                 continue
-            resolved = (path.parent / target).resolve()
+            # Lexical, not `resolve()`: a file in the tree may be a link to package data, and
+            # the wheel ships it as a file inside the tree.
+            resolved = Path(os.path.normpath(path.parent / target))
             if not resolved.is_relative_to(root):
                 offenders.append(f"{path.relative_to(root)}: {target}")
     assert offenders == []

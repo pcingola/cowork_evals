@@ -10,13 +10,14 @@ directory. It never calls `claude plugin eval`: that harness has to load a plugi
 Claude Code knows how. The case format is shared with the harness. The execution is not.
 
 The split from the driver is one question: does the statement need to know what a case is?
-Yes, and it is here. No, and it is in [cowork_driver.md](cowork_driver.md), which holds the
-transport and nothing else.
+Yes, and it is here. No, and it is in [cowork_driver.md](cowork_driver.md) and
+[cowork_driver_internals.md](cowork_driver_internals.md), which hold the transport and nothing
+else.
 
 Which part of the case format survives this route is [approaches.md](approaches.md), the
 key-by-key rule is [running_evals.md](running_evals.md), the case format itself is
 [eval_format.md](eval_format.md), and the command over it is [cli.md](cli.md). What of this
-is built is the status table in [running_evals.md](running_evals.md).
+is built is [status.md](status.md).
 
 ## What a suite does
 

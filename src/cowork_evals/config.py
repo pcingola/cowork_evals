@@ -303,7 +303,7 @@ class CoWorkSection:
 
 @dataclass(frozen=True, slots=True)
 class EvalSection:
-    """What the `claude plugin eval` argument list reads. docs/running_evals.md.
+    """What the `claude plugin eval` argument list reads. docs/run_pipeline.md.
 
     `judge_model` has a second reader: the CoWork backend's judge, which is `claude -p` and
     not that command line. docs/cowork_driver.md.

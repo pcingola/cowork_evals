@@ -1,4 +1,4 @@
-"""The `claude plugin eval` command line. docs/running_evals.md pins every flag here.
+"""The `claude plugin eval` command line. docs/run_pipeline.md pins every flag here.
 
 Nothing in this file runs the harness. The argument list is the unit under test.
 """

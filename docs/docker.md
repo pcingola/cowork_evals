@@ -29,7 +29,7 @@ exercises the same versions a session does. The inventory it has to match is
   host and builds the argument lists.
 
 The eval system around it is [running_evals.md](running_evals.md), the command that reaches it
-is [cli.md](cli.md), and what of this is built is that file's status table.
+is [cli.md](cli.md), and what of this is built is [status.md](status.md).
 
 ## Configuration
 
@@ -131,7 +131,7 @@ carries no `EXTERNALLY-MANAGED` marker, so pip installs into the system interpre
 flag.
 
 This image carries no pytest, so the inventory stays exact. The image that does carry pytest
-is one layer over this one, and is [cowork_test.md](cowork_test.md).
+is one layer over this one, and is [the test image](#the-test-image).
 
 ## unoserver and the UNO bindings
 
@@ -168,8 +168,8 @@ NodeSource and the uv installer detect the architecture themselves and need no m
 The build context is the package's data directory, `src/cowork_evals/data/`, and the Dockerfile
 is passed with `-f`. That directory holds the three requirements files, the example
 configuration file, the shipped skills and `cowork_env.sh`, and nothing else. This image copies
-two files out of it, `requirements_installable.txt` and `cowork_env.sh`; the layer in
-[cowork_test.md](cowork_test.md) builds from the same context and copies `requirements_test.txt`.
+two files out of it, `requirements_installable.txt` and `cowork_env.sh`; [the test
+image](#the-test-image) builds from the same context and copies `requirements_test.txt`.
 
 No source tree is in the context, so no `.dockerignore` is needed and a working tree cannot
 reach a public image layer. See [library.md](library.md). The plugin and the logs are mounts,
@@ -227,8 +227,7 @@ installs it as a global npm package, `@anthropic-ai/claude-code`, at the version
 `CLAUDE_CODE_VERSION` build argument. `docker.claude_code_version` supplies it, default 2.1.265.
 It is in the image digest, so two versions cannot share one tag.
 
-Not every version runs here. 2.1.259, the version [plugin_eval.md](plugin_eval.md) is written
-against, cannot run a Bash-granting case on Linux at all. It masks `<sandbox home>/.aws` as both
+Not every version runs here. 2.1.259 cannot run a Bash-granting case on Linux at all. It masks `<sandbox home>/.aws` as both
 a directory and `/dev/null`, and `bwrap` dies on the second with `Can't create file at <sandbox
 home>/.aws: Is a directory`. Every sandboxed command then exits 1 and the model reports a broken
 sandbox rather than the command's output. The path is inside the sandbox home, which the harness
@@ -248,6 +247,112 @@ refuses to start a granted shell tool unless both are installed, and the pinned 
 socat not installed`, and the case is scored 0 rather than errored, so the failure reads as a
 bad answer unless the notes column is read. `probe.py` reports both and parity fails on
 neither.
+
+## The harness
+
+`claude plugin eval` is in early access and is not publicly documented. Anthropic's full
+reference is vendored in [claude_code/](claude_code/README.md), with the CLI version it came
+from. What a case author needs from the harness is [plugin_eval.md](plugin_eval.md). This
+section is how this backend invokes it.
+
+### Availability
+
+The command is enabled per organization by the `tengu_walnut_spire` rollout flag. When it is
+not enabled, the command prints that it is in early access and exits 1. The command exists
+either way. Enabled first-party clients pick the flag up after `claude update` and a fresh
+session.
+
+A client that cannot fetch server-side flags must set `CLAUDE_CODE_WALNUT_SPIRE=1`. That covers
+Bedrock, Vertex, Foundry, any client with a custom `ANTHROPIC_BASE_URL`, and any client with
+`DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or
+`DISABLE_GROWTHBOOK` set. It needs CLI 2.1.207 or later. This backend sets it inside the
+container, so a consumer sets nothing.
+
+It cannot be committed to a repository's `.claude/settings.json` `env`. Only allowlisted
+variables apply from project settings, this one is not allowlisted, and `claude plugin ...` run
+from a shell or CI does not pass trust. Set it in the shell, in CI, in `~/.claude/settings.json`
+under `env`, or in managed settings.
+
+Self-test from an empty directory:
+
+| Output                | Means            |
+| --------------------- | ---------------- |
+| `early access`        | Not enabled here |
+| `No eval cases found` | Enabled          |
+
+### The command line
+
+```
+claude plugin eval [target] [--case glob] [--tag t...] [--runs n] [--model m]
+                   [--judge-model m] [--max-cost-usd usd] [--eval-dir dir]
+                   [--output-dir dir] [--json [file]] [--threshold 0..1]
+                   [--allow-tools t...] [--scaffold|--no-scaffold]
+                   [--ablation none|with-without] [--mocks record|off]
+                   [--keep-temp] [--verbose] [--report path]
+                   [--publish-report|--no-publish]
+```
+
+The target is a path, an installed plugin name, or `name@marketplace`. Put it before `--tag`,
+`--allow-tools` and `--json`: those are variadic and swallow a trailing target. This backend
+passes a path.
+
+Exit codes: 0 every case at or above the threshold (default 1.0); 1 below threshold, load
+error, no cases, bad options; 2 partial, meaning the cost ceiling was hit or the credential was
+rejected; 130 interrupted; 143 terminated.
+
+Cases live under `evals/` by default. `--eval-dir` and the manifest's `experimental.evals` move
+it, and this backend moves neither. Left alone the CLI writes `aggregate-result.json` and
+`report.html` to `<eval dir>/results/<timestamp>/`, inside the consumer's checkout.
+
+### The defaults the pinned flags replace
+
+The pinned list is [running_evals.md](running_evals.md). Each harness default below is wrong
+for this package.
+
+| Flag             | Harness default                                            | Behaviour behind it                                                                                                                                                                             |
+| ---------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--model`        | the case's `execution.model`, else the child's own default | `ANTHROPIC_MODEL` is not inherited by the agent under test. Unpinned, a model rollout reads as a regression                                                                                      |
+| `--judge-model`  | a small fast model                                         | The same, for the graders                                                                                                                                                                       |
+| `--ablation`     | `none` for a path target, `with-without` for a named plugin | The baseline arm doubles the agent runs and demotes `tool_used: Skill` graders to unscored indicators. Pinned, a target that is later named rather than pathed does not change the score        |
+| `--threshold`    | `1.0`                                                      | At `0` the harness fails nothing, which hands pass and fail to this package                                                                                                                      |
+| `--max-cost-usd` | no ceiling                                                 | Spend backstop. Hitting it exits 2 with partial results                                                                                                                                         |
+| `--output-dir`   | `<eval dir>/results/<timestamp>/`                          | Puts `aggregate-result.json` and `report.html` in a log directory rather than under the plugin                                                                                                   |
+| `--no-publish`   | publish attempted when the account can                     | The HTML report is otherwise published to claude.ai                                                                                                                                             |
+| `--no-scaffold`  | scaffold off                                               | `context.scaffold_script` is author-supplied shell and runs as the invoking user                                                                                                                |
+| `--keep-temp`    | off                                                        | Without it only an errored run's sandbox survives. A run that scored low is deleted with its `trace.jsonl`                                                                                       |
+| `--verbose`      | off                                                        | Extra trace logging reaches the debug log only. Nothing extra reaches the terminal                                                                                                               |
+
+`--json` is never passed. It silences progress lines, per-case grader lines, notices and the
+summary table, and an errored run's sandbox is not kept. `--output-dir` gives the same document
+with none of that loss.
+
+A run's sandbox is created under `TMPDIR`, so the caller chooses where a kept sandbox lands.
+That is how this backend gets one onto the host: [Mounts](#mounts). A kept sandbox is left
+read-only, with the two trees the plugin under test wrote at mode 000 under `sealed/`, and
+`out/trace.jsonl` readable beside them.
+
+### An unknown case key
+
+On CLI 2.1.265, through this backend:
+
+| Where the key was       | The harness                                                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `prompt.md` frontmatter | Refused the case at load, named the allowed set, ran nothing and wrote no `aggregate-result.json`. The command exited 1 |
+| `case.yaml`             | Loaded the case and ran it                                                                                             |
+
+The refusal is at case load and before the credential is read, so it costs no model call, and a
+whole suite produces no result document for one malformed case. A fact this package reads off a
+case therefore cannot ride in `prompt.md` frontmatter, which is why `no-cowork` is a tag. The
+allowed set the harness named carries `artifact_publish` and `growthbook_overrides`, which the
+case validator refuses.
+
+### Proving the harness works
+
+`docs/claude_code/eval_smoke/run.sh` is a throwaway plugin with two skills, three cases and
+four grader types. It calls `claude plugin eval` directly, with no wrapper from this package,
+so it separates a harness problem from a runner problem. See
+[claude_code/eval_smoke/README.md](claude_code/eval_smoke/README.md). The cost measured over it
+is in [plugin_eval.md](plugin_eval.md#cost).
 
 ## Which CoWork packages the image installs
 
@@ -314,7 +419,7 @@ No login is a failed preflight, so it exits 3 and names the command that fixes i
 
 `CLAUDE_CODE_WALNUT_SPIRE` is passed in with `--env`, because the process inside the container is
 `claude plugin eval` itself with no wrapper in the way. A shell opened in the container by hand
-must export it. See [plugin_eval.md](plugin_eval.md).
+must export it. See [Availability](#availability).
 
 ### How long a login lasts
 
@@ -569,6 +674,86 @@ build input is in the digest, so no change can be served from a stale image.
 There is no `latest` tag. Nothing reads one: `run` and `check` resolve the digest tag, and a
 `latest` left behind by an older build points at an image no command would choose.
 
+## The test image
+
+`cowork_evals test` runs in a second image, one install layer over this one. What a consumer
+sees of it is [cowork_test.md](cowork_test.md).
+
+| Tag                          | Is                                | Built by                                        |
+| ---------------------------- | --------------------------------- | ----------------------------------------------- |
+| `cowork-evals:<digest>`      | The CoWork image an eval runs in  | `setup --docker`, or `scripts/image.sh`         |
+| `cowork-evals-test:<digest>` | That image plus one install layer | `setup --docker`, or `scripts/cowork_pytest.sh` |
+
+`scripts/cowork_pytest.sh` is the development task behind the same two images, and
+`scripts/README.md` owns it.
+
+The eval image never carries pytest. A package installed for the test runner would show in the
+eval image's `pip freeze` as a package a session does not have, so `scripts/parity.sh` and the
+inventory in [runtime.md](runtime.md) both stay exact.
+
+The test digest is the sha256 of the base image's digest, `Dockerfile.pytest`,
+`requirements_test.txt` and the resolved `docker.platform`, truncated to twelve characters. The
+base digest goes in first, so a rebuilt base is a different test tag and not a stale hit over
+an old base. There is no `latest`.
+
+One module per image. `src/cowork_evals/docker/__init__.py` owns the image the harness runs in,
+and `src/cowork_evals/docker/pytest_image.py` owns the image pytest runs in. Each owns its
+Dockerfile, its digest, its argument lists, its check and the one command that fixes an absent
+image. The class is `PytestImage` and not `TestImage`: pytest collects a class named `Test*`
+and warns on the name in every test module that imports it.
+
+`Dockerfile.pytest` declares `ARG BASE_TAG` before its `FROM` and nothing else, so it names no
+image of its own. The argument has no default, so BuildKit prints `InvalidDefaultArgInFrom` on
+every build. A default would be a default base tag, which is the stale base the digest
+prevents, so the warning stays.
+
+### The pinned list
+
+`src/cowork_evals/data/requirements_test.txt` holds pytest and every package it needs that the
+inventory does not carry, each pinned to an exact version. A package already in the inventory
+is never listed, whatever version pytest would prefer. The layer installs the file with
+`--no-deps`: a bare `pip install pytest` may move an inventory pin, and a moved pin voids what
+the image claims to be. Which requirements file a new pin goes in is
+[environments.md](environments.md).
+
+`pip install --dry-run pytest` inside the image on `linux/arm64` resolves pytest 9.1.1 and would
+install five packages and move none:
+
+| Package          | Version | In the inventory |
+| ---------------- | ------- | ---------------- |
+| `pytest`         | 9.1.1   | no               |
+| `pluggy`         | 1.6.0   | no               |
+| `iniconfig`      | 2.3.0   | no               |
+| `exceptiongroup` | 1.3.1   | no               |
+| `tomli`          | 2.4.1   | no               |
+
+Three further requirements pytest declares are already satisfied at the inventory's versions:
+`packaging` 26.3, `Pygments` 2.11.2 and `typing_extensions` 4.16.0. Installing the five with
+`--no-deps` adds exactly those five lines to the image's `pip freeze` and changes no other line.
+`tests/integration/test_pytest_image.py` asserts that against both real images, and
+`tests/unit/test_environments.py` asserts the lists do not overlap without a daemon.
+
+### The test container
+
+The test container differs from a `run --docker` container:
+
+| Difference                            | Reason                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------- |
+| The plugin mount is read-write        | pytest writes `.pytest_cache` and `__pycache__` beside a suite, and a read-only mount would change what a suite does |
+| Runs as the host uid and gid          | What pytest writes into the tree belongs to the developer, not to root     |
+| No credential mounts                  | There is no model call                                                     |
+| No `--security-opt`                   | There is no `Bash` grant, so no OS sandbox starts                          |
+| No harness enablement variable        | The harness is not in the path                                             |
+| No `--network` restriction            | A session has network. Cutting it would fail a test here that passes there |
+| No log mount, run directory, `env.txt`, `latest` or `--out` | Those hold `aggregate-result.json`, which pytest does not produce |
+| `PYTHONPATH` not set                  | The image sets its own, for pyuno. Overwriting it removes `import uno`     |
+
+Every exit code the CLI defines for itself is reachable only before the container starts, on a
+parse failure or a failed preflight. Nothing in this package raises on pytest's exit code.
+
+A host run under the 3.10 mirror is not offered as a backend. The mirror reproduces the
+interpreter and the wheels only. See [environments.md](environments.md).
+
 ## Parity
 
 `scripts/parity.sh` runs one probe inside the container, with the probe bind-mounted read-only,
@@ -582,6 +767,10 @@ Nothing from this package is installed into the image to do it.
 No file under `docs/` is parsed. The pins come from the shipped `requirements.txt`, and the
 non-Python versions are a table in `parity.py` that cites [runtime.md](runtime.md). A change to
 that file is carried into the table by hand, in the same commit.
+
+Every value in [runtime.md](runtime.md) was read from a real session by direct probe. When the
+CoWork base image changes, re-capture the inventory from a session, update runtime.md and the
+shipped `requirements.txt`, and carry the change into `parity.py`.
 
 | Delta                                             | Result                 | Why                                                            |
 | ------------------------------------------------- | ---------------------- | -------------------------------------------------------------- |

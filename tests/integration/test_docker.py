@@ -40,7 +40,7 @@ EVAL_SMOKE = ROOT / "docs" / "claude_code" / "eval_smoke"
 # in the same commit.
 PYTHON_VERSION = f"Python {EXPECTED_VERSIONS['python3']}"
 
-# docs/plugin_eval.md, the enablement self-test. `early access` there means the harness is
+# docs/docker.md, the enablement self-test. `early access` there means the harness is
 # not enabled for this credential, which a passing eval run cannot tell from a broken image.
 NO_CASES = "No eval cases found"
 

@@ -303,7 +303,7 @@ def _aggregates(cases: list[CaseResult]) -> dict[str, Any]:
     at or above `threshold`, and `threshold` is 0 here, so a declared case left in
     `casesTotal` alone would count as passed and its 0.0 would drag `overallScore` down for a
     case that never ran. A suite of nothing but declared cases reports the same four numbers
-    as a suite of no cases at all. docs/running_evals.md.
+    as a suite of no cases at all. docs/run_pipeline.md.
     """
     ran = [case for case in cases if not case.declared]
     total = len(ran)

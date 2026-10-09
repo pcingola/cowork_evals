@@ -315,15 +315,11 @@ your repository picks them up from there. They fire on different questions.
 | `cowork-ask`   | A question about what a live CoWork session actually does; a claim that has to be confirmed in the product; a failing `cowork_evals ask` |
 | `cowork-skill-author` | Creating, reviewing or validating a skill; asking whether plugin code runs in a CoWork session |
 
-`cowork-evals` carries the case tree, the two required frontmatter keys, the six grader types,
-three copy-paste grader idioms, two copy-paste checks, the eleven authoring traps, the exit
-codes and the 3.10 runtime constraint. `cowork-ask` carries the verb, what one ask costs, and the rule that makes an
-answer evidence: ask the session to do the thing and read what it did, because what a session
-says about its own configuration is not evidence. Both send a reader to `cowork_evals docs`
-for everything they do not carry. `cowork-skill-author` carries the plugin and skill layout,
-the frontmatter and wrapper conventions, a review checklist, what a session provides (Python
-and its packages, the installed commands, Node packages, environment variables), and the
-session's `pip freeze`.
+Each skill holds a procedure in `SKILL.md` and the files it reads under `references/`. A
+reference that covers this package or CoWork is a link to the consumer file in `docs/` of the
+same name, so a skill reads the same text you read here. `cowork-skill-author` also carries the
+plugin and skill layout, the frontmatter and wrapper conventions and a review checklist, which
+live in the skill alone.
 
 The skills belong to the package. `init` replaces them whole, so an edit to one is lost on the
 next run. Your own skills under `.claude/skills/` are not touched, unless one uses the name of a
@@ -342,11 +338,11 @@ reads the same files without this repository checked out.
 | [`docs/eval_format.md`](docs/eval_format.md)     | How to write a case: tree, frontmatter, graders    |
 | [`docs/checks.md`](docs/checks.md)               | Assertions you write as Python, over the files a run produced |
 | [`docs/approaches.md`](docs/approaches.md)       | The two backends, and what each one proves         |
-| [`docs/running_evals.md`](docs/running_evals.md) | The run: what is built today, pass and fail, logs, cost |
+| [`docs/running_evals.md`](docs/running_evals.md) | The run: pass and fail, logs, cost                 |
 | [`docs/cowork_test.md`](docs/cowork_test.md)     | `test`, and the runtime your suite gets            |
 | [`docs/runtime.md`](docs/runtime.md)             | What a CoWork session provides, and what your plugin code may import |
 | [`docs/library.md`](docs/library.md)             | What ships, what it writes, and where              |
-| [`docs/README.md`](docs/README.md)               | Everything else, in reading order                  |
+| [`docs/README.md`](docs/README.md)               | Every file, by reader                              |
 
 The name `cowork_evals docs` takes is the path inside the tree without the extension, so
 `cowork_evals docs eval_format` prints the second row's file.

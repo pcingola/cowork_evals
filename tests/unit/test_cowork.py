@@ -1,4 +1,4 @@
-"""The driver reads a session as docs/cowork_driver.md says it does.
+"""The driver reads a session as docs/cowork_driver_internals.md says it does.
 
 Every assertion is over a hand-written session directory, under tests/data/cowork/ or under
 tmp_path. No test here starts a CoWork session. The tests that read a real profile are in

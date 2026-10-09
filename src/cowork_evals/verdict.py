@@ -365,7 +365,7 @@ def _judge_grader(
     """One grader result, joined to its definition by name to learn its class.
 
     A result carries `name`, `passed` and `scored` and never `type`, so the definition is
-    the only route to the class. docs/running_evals.md.
+    the only route to the class. docs/run_pipeline.md.
 
     `kept` is the run's artefact suffix, on every line a person would investigate: a note
     needs the transcript as much as a failure does. A skip and an undefined

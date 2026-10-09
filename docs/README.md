@@ -25,93 +25,87 @@ rather than restating it.
 
 ## The files
 
-Read them in this order.
+The files divide by reader. A consumer file holds what a consumer, or the model working for
+one, acts on. A shipped skill links it under its own `references/`, so a model reads the same
+file a person reads here. A developer file holds how this package is built and why. Each fact
+has one home: a developer file links the consumer file and never restates it.
 
-**The system**
+**For a consumer, and linked by a skill**
 
-| File                                   | Covers                                                            |
-| -------------------------------------- | ----------------------------------------------------------------- |
-| [`library.md`](library.md)             | The boundary: what ships, how it installs, the one configuration file, where state lives |
-| [`cli.md`](cli.md)                     | The `cowork_evals` command: every verb, its options, what it refuses, exit codes |
-| [`approaches.md`](approaches.md)       | The two backends: what each proves, what each costs, which part of a case each honours |
-| [`eval_format.md`](eval_format.md)     | The authoring contract: the case tree, frontmatter, graders, what the validator refuses |
-| [`eval_design.md`](eval_design.md)     | Suggestions for designing an eval suite: what to check, showing what the skill adds, reading the results |
-| [`running_evals.md`](running_evals.md) | What a run does with a case tree: build status, pinned flags, pass and fail, logs, cost |
-| [`cowork_test.md`](cowork_test.md)     | `cowork_evals test`: a consumer's pytest suite on the CoWork runtime, no model |
+| File                                     | Covers                                                                   | Linked by                  |
+| ---------------------------------------- | ------------------------------------------------------------------------ | -------------------------- |
+| [`eval_design.md`](eval_design.md)       | Which cases to write, which assertion answers what, reading the results  | `cowork-evals`             |
+| [`eval_format.md`](eval_format.md)       | The case tree, frontmatter, `case.yaml`, mocks, the validator, the authoring traps | `cowork-evals`   |
+| [`plugin_eval.md`](plugin_eval.md)       | Every grader type and field, ablation arms, the limits a case cannot fix, cost | `cowork-evals`       |
+| [`checks.md`](checks.md)                 | Writing a check: a Python assertion over the files a run produced        | `cowork-evals`             |
+| [`cli.md`](cli.md)                       | Every verb, option, refusal and exit code                                | `cowork-evals`             |
+| [`running_evals.md`](running_evals.md)   | Selection, settings, pass and fail, ablation, the run directory, transcripts, cost | `cowork-evals`   |
+| [`cowork_test.md`](cowork_test.md)       | `cowork_evals test`: a plugin's pytest suite on the CoWork runtime       | `cowork-evals`             |
+| [`panel.md`](panel.md)                   | What `panel` shows, and the history records behind it                    | `cowork-evals`             |
+| [`approaches.md`](approaches.md)         | What each backend proves, honours and costs                              | `cowork-evals`, `cowork-ask` |
+| [`ask.md`](ask.md)                       | `cowork_evals ask`: options, output, cost, preflight, exit codes         | `cowork-evals`, `cowork-ask` |
+| [`cowork_driver.md`](cowork_driver.md)   | The submission sequence, the `cowork:` keys, the session document, the failure taxonomy | `cowork-evals`, `cowork-ask` |
+| [`cowork_desktop.md`](cowork_desktop.md) | The desktop application as measured: what it writes, how a skill loads, the authorizations | `cowork-evals`, `cowork-ask` |
+| [`runtime.md`](runtime.md)               | What a CoWork session provides, and the rules for plugin code            | all three                  |
+| `pip_freeze.txt`                         | Every Python package a session has, and its version. A link to the package's `requirements.txt` | all three |
 
-**The mechanisms under it**
+A consumer file links only to consumer files that every skill linking it also links, so each
+link resolves in `docs/` and in each skill's `references/`.
 
-| File                                     | Covers                                                          |
-| ---------------------------------------- | --------------------------------------------------------------- |
-| [`docker.md`](docker.md)                 | The container that reproduces the CoWork image: OS, tooling, pins, credentials, parity |
-| [`cowork_driver.md`](cowork_driver.md)   | Driving the desktop application: the API, the sequence, the session document |
-| [`cowork_backend.md`](cowork_backend.md) | The layer over the driver: grading a session document, the judge, the result document |
-| [`environments.md`](environments.md)     | The two Python environments, and the three requirements files behind them |
-| [`panel.md`](panel.md)                   | The per-case history a run appends, and the panel that renders it |
-| [`checks.md`](checks.md)                 | Writing a check: a Python assertion over the files a run produced |
+**For a developer of this package**
 
-**Measured, not built here**
-
-| File                                     | Covers                                                          |
-| ---------------------------------------- | --------------------------------------------------------------- |
-| [`runtime.md`](runtime.md)               | What a CoWork session provides: the image inventory, and what the host hands a skill |
-| [`cowork_desktop.md`](cowork_desktop.md) | The desktop application as probed: deep links, session filesystem, authorizations |
-
-**From outside, and one design that was not built**
-
-| File                                     | Covers                                                          |
-| ---------------------------------------- | --------------------------------------------------------------- |
-| [`plugin_eval.md`](plugin_eval.md)       | `claude plugin eval`: availability, flags, the limits a case author cannot work around |
-| [`claude_code/`](claude_code/README.md)  | The vendored harness reference, and the smoke plugin that proves the harness works |
-| [`staged_runtime.md`](staged_runtime.md) | Designed and not built: the staged 3.10 runtime and the venv backend over it |
+| File                                                       | Covers                                                   | Consumer file it serves |
+| ---------------------------------------------------------- | -------------------------------------------------------- | ----------------------- |
+| [`library.md`](library.md)                                 | The boundary: what ships, how it installs, the configuration file, the skills | all              |
+| [`status.md`](status.md)                                   | Which pieces are built                                   | all                     |
+| [`cli_design.md`](cli_design.md)                           | The decisions behind the command surface                 | `cli.md`                |
+| [`run_pipeline.md`](run_pipeline.md)                       | How `run` drives the harness, collects runs and decides the verdict | `running_evals.md` |
+| [`case_history.md`](case_history.md)                       | How the history store is written, and its shape          | `panel.md`              |
+| [`checks_layer.md`](checks_layer.md)                       | How checks are loaded and written into the result document | `checks.md`           |
+| [`docker.md`](docker.md)                                   | The container, the harness inside it, the test image, pins, credentials, parity | `plugin_eval.md`, `cowork_test.md`, `runtime.md` |
+| [`cowork_driver_internals.md`](cowork_driver_internals.md) | The driver's Python API and the design of each step      | `cowork_driver.md`      |
+| [`cowork_backend.md`](cowork_backend.md)                   | The layer over the driver: grading a session document, the judge, the result document | `cowork_driver.md` |
+| [`environments.md`](environments.md)                       | The two Python environments, and the three requirements files | `runtime.md`       |
+| [`claude_code/`](claude_code/README.md)                    | The vendored harness reference, and the smoke plugin that proves the harness works | `plugin_eval.md` |
+| [`staged_runtime.md`](staged_runtime.md)                   | Designed and not built: the staged 3.10 runtime and the venv backend over it | none |
 
 ## How the files divide
 
-Each split below is decided by one question, and that question holds for every statement
-already on either side.
+**A consumer file, or a developer file.** Does a consumer, or the model working for one, act
+on the statement? Yes, and it is in a consumer file. No, and it is in a developer file. An
+internal name, an implementation and the reason for a decision are developer statements.
 
 **The command, or the run.** Does the statement describe what you type? Yes, and it is in
-[`cli.md`](cli.md): the verbs, the options, what a verb refuses, the exit codes. No, and it is
-in [`running_evals.md`](running_evals.md), which holds what the command does with a case tree
-whichever backend it chose.
+[`cli.md`](cli.md). No, and it is in [`running_evals.md`](running_evals.md), which holds what
+the command does with a case tree whichever backend it chose.
 
 **The run, or the other thing the command runs.** Does the statement concern a verdict over
 cases? Yes, and it is in `running_evals.md`. No, and it is in
 [`cowork_test.md`](cowork_test.md), which returns pytest's exit code and produces no result
 document.
 
-**The run, or a mechanism.** A mechanism file holds how one thing works and everything
-measured about it: [`docker.md`](docker.md) the container, [`cowork_driver.md`](cowork_driver.md)
-the desktop driver, [`environments.md`](environments.md) the two Python environments,
-[`panel.md`](panel.md) the history, [`checks.md`](checks.md) the layer that runs a consumer's
-own Python over what a run produced. A fact measured during a run belongs with the mechanism
-it binds, not with the run.
-
 **The driver, or the backend over it.** Does the statement need to know what a case is? Yes,
 and it is in [`cowork_backend.md`](cowork_backend.md). No, and it is in
-[`cowork_driver.md`](cowork_driver.md), which holds the transport and nothing else.
+[`cowork_driver.md`](cowork_driver.md) or
+[`cowork_driver_internals.md`](cowork_driver_internals.md).
 
 **A mechanism, or a measurement.** Does this repository build the thing? No, and what was
 probed about it is in [`runtime.md`](runtime.md) for the session image and
-[`cowork_desktop.md`](cowork_desktop.md) for the desktop application. A mechanism file cites a
-value from either and never restates it, so `cowork_driver.md` states the driver's design and
-links the application shape it reads.
+[`cowork_desktop.md`](cowork_desktop.md) for the desktop application. Any other file cites a
+value from either and never restates it.
 
 **The case, or the harness.** Can a case author work around the limit by editing a case? Yes,
-and it is in [`eval_format.md`](eval_format.md), the contract a case is written to. No, and it
-is in [`plugin_eval.md`](plugin_eval.md), which describes a Claude Code command this
-repository does not own and carries the CLI version it was written against.
+and it is in [`eval_format.md`](eval_format.md). No, and it is in
+[`plugin_eval.md`](plugin_eval.md).
 
 **Where a check goes, or how to write one.** `eval_format.md` places the `checks/` directory in
-the case tree. [`checks.md`](checks.md) is the instructions for writing the Python inside it.
+the case tree. [`checks.md`](checks.md) is how to write the Python inside it.
 
-**A setting's home.** [`library.md`](library.md) owns the configuration file: its four
-sections, the precedence ladder and the one route from the environment. What a setting does is
-stated with the mechanism it configures.
+**A setting's home.** [`library.md`](library.md) owns the configuration file: its sections, the
+precedence ladder and the one route from the environment. What a setting does is stated with
+the mechanism it configures.
 
-Build status is the one fact that goes the other way. Every piece has a row in
-`running_evals.md`'s status table whatever mechanism it belongs to, and the files whose
-subjects have a row link there.
+Build status is in [`status.md`](status.md) and nowhere else.
 
 The three requirements files are measurements too and are not here: they are package data at
 `src/cowork_evals/data/`, and [`environments.md`](environments.md) owns the split between them.

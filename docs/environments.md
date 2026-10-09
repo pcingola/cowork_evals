@@ -136,7 +136,7 @@ names nothing either of the other two pins. `tests/unit/test_environments.py` as
 `requirements_installable.txt` is `requirements.txt` minus exactly the nine below at identical
 versions, and that `requirements_test.txt` and `requirements.txt` share no name. The second
 assertion is what keeps the test image's install additive, because that layer installs with
-`--no-deps`; see [cowork_test.md](cowork_test.md).
+`--no-deps`; see [docker.md](docker.md#the-pinned-list).
 
 The nine are `command-not-found`, `dbus-python`, `distro-info`, `pipx`, `PyGObject`,
 `pyinotify`, `python-apt`, `ufw`, `unattended-upgrades`. They are importable in a session, so an

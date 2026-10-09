@@ -540,7 +540,7 @@ def add_spend(entry: dict[str, Any], spent: float, key: str = RUN_SPEND) -> None
 
     The two fields it is added to are a run's `judgeCostUsd` and the document's `costUsd`,
     which are what the panel and `eval.max_cost_total_usd` read. A healthy document with no
-    judged check is unchanged. docs/checks.md.
+    judged check is unchanged. docs/checks_layer.md.
     """
     if not spent:
         return
@@ -580,7 +580,7 @@ def run(output_dir: Path | str, root: Path | str, *, judge_model: str) -> list[s
     the case's, and the run's score, the case's aggregates and the spend recomputed after.
 
     Every arm a case carries is walked, so a check reads what the baseline produced too and the
-    two arms are compared on the same assertions. docs/checks.md.
+    two arms are compared on the same assertions. docs/checks_layer.md.
 
     A case carrying `declaredUnrunnable` has no run and produces no check result. It is
     counted, exactly as it is today.
@@ -630,7 +630,7 @@ def _recount(document: dict[str, Any]) -> None:
     which is the reference's rule and `results._aggregates`'s. `meanDelta` is the mean of the
     case deltas that are defined. `casesTotal` and `casesPassed` are untouched: `--threshold`
     is pinned to 0, so every case counts as passed there whatever a check said, and this
-    package decides pass and fail. docs/checks.md.
+    package decides pass and fail. docs/checks_layer.md.
     """
     counted = [
         case

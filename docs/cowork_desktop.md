@@ -2,13 +2,12 @@
 
 ## Summary
 
-This file records how the CoWork desktop application behaves, so that a script can drive it:
-how a session is started, where a session writes, what the records it writes look like, and
-what a machine has to be granted first. The application is not built here and promises no
-interface, so every statement is measured by direct probe on macOS and carries the conditions
-it holds under. Any release can change all of it, so the coupling list at the end is the checklist to
-re-probe after an application update. What the driver does with these facts is
-[cowork_driver.md](cowork_driver.md), which cites this file and never restates it.
+This file records how the CoWork desktop application behaves: how a session is started,
+where a session writes, what the records it writes look like, what a session does when asked,
+how a skill loads in a session, and what a machine has to be granted first. The application
+is not built here and promises no interface, so every statement is measured by direct probe on
+macOS and carries the conditions it holds under. Any application update can change all of it.
+What the driver does with these facts is [cowork_driver.md](cowork_driver.md).
 
 Four things shape everything below. Input is a deep link, and no query parameter submits.
 Submission is a synthetic Return, which needs the macOS Accessibility grant, and no supported
@@ -37,8 +36,8 @@ A build may install more than one profile directory. Which one is active is read
 on the running process. Name the active profile in `cowork_evals.yaml`; do not hardcode it.
 See [cowork_driver.md](cowork_driver.md).
 
-Chrome DevTools Protocol was not pursued. The application ships Electron fuses that disable
-`RunAsNode` and `EnableNodeCliInspectArguments`.
+The application ships Electron fuses that disable `RunAsNode` and
+`EnableNodeCliInspectArguments`, so no Chrome DevTools Protocol route reaches it.
 
 The driven run is one measurement of one prompt: a marker prompt, no tool call, and a warm
 VM bundle already on disk. It is the floor, not the typical case. The 45 second boot above is
@@ -261,17 +260,35 @@ The session's own prose named ten of the eleven and added two the directory does
 The eleven above are what `bash` printed. What a session says about its own configuration is
 not evidence.
 
+## How a skill loads in a session
+
+A session has no `Skill` tool. It reads a skill's `SKILL.md` with `cat` over the read only
+skills mount in section 4, through `mcp__workspace__bash`. To see that a skill fired, look in
+the session document's `tool_calls` for a `mcp__workspace__bash` call whose `input` reads that
+`SKILL.md`. A `tool_used: Skill` assertion has nothing to match in a CoWork session.
+
+A session's skill set is the profile's. To run a session without a skill, use a profile the
+skill was never installed into.
+
+A prompt that names a skill the session does not have produces nothing: the session says the
+skill does not exist and ends the turn. Ask for the outcome the skill produces, never for the
+skill by name.
+
+What a session says about its own skills, tools or configuration is not evidence. Ask it to
+list the directory or run the command, and read the `result` of that call in `tool_calls`.
+
 ## Authorizations
 
 None of these is discoverable from the code. A second machine needs all of them.
+`cowork_evals check --cowork` reports the Accessibility grant and none of the others.
 
-| Authorization                                | Granted by               | Why                                          | Scope       |
-| -------------------------------------------- | ------------------------ | -------------------------------------------- | ----------- |
-| macOS Accessibility for the driving terminal | User, in System Settings | Synthetic Return, else osascript error 1002  | Per machine |
-| `Bash(open "claude://*")` permission rule    | User, in Claude Code     | Fire the deep link                           | Per machine |
-| `Bash(osascript:*)` permission rule          | User, in Claude Code     | Press Return                                 | Per machine |
-| CoWork signed in                             | User                     | Organization SSO with MFA is not automatable | Per machine |
-| `disableDeepLinkRegistration` not set        | Tenant admin             | Disables `claude://` handling, fails closed  | Tenant wide |
+| Authorization                                | Granted by               | Needed for                                   | Without it                         | Scope       |
+| -------------------------------------------- | ------------------------ | -------------------------------------------- | ---------------------------------- | ----------- |
+| macOS Accessibility for the driving terminal | User, in System Settings, Privacy and Security, Accessibility | The synthetic Return | Driver code 3, `osascript` error 1002 | Per machine |
+| `Bash(open "claude://*")` permission rule    | User, in Claude Code     | Firing the deep link                         | The deep link cannot fire          | Per machine |
+| `Bash(osascript:*)` permission rule          | User, in Claude Code     | Pressing Return                              | Return cannot be pressed           | Per machine |
+| CoWork signed in                             | User                     | Any session. Organization SSO with MFA is not automatable | No session starts     | Per machine |
+| `disableDeepLinkRegistration` not set        | Tenant admin             | `claude://` handling                         | Driver code 4. It fails closed     | Tenant wide |
 
 The Accessibility grant follows the application that owns the terminal process, not the
 script. Determine it by walking the parent process chain.
@@ -293,23 +310,3 @@ git-ignored:
   }
 }
 ```
-
-## Coupling list
-
-Re-probe every item after an application update. This is a checklist, not an investigation.
-
-The `claude://claude.ai/new` route, the `q`, `surface`, `file` and `folder` parameter names,
-the 14336 cap, the `Claude` process name `System Events` reports, the sessions root path, the
-three level session directory depth, the `audit.jsonl` filename, the `user` and
-`command_lifecycle` record types, the `state` values,
-the transcript path under `.claude/projects/session`, the `subagents/*.jsonl` layout, the
-`tool_use` `id` and `tool_result` `tool_use_id` fields, the `outputs/` directory, and the
-`Write`, `mcp__workspace__bash` and `mcp__workspace__web_fetch` tool names.
-
-Every field a reader of a collected session acts on, by file:
-
-| File            | Fields                                                                        |
-| --------------- | ------------------------------------------------------------------------------- |
-| `audit.jsonl`   | `type`, `state`, `timestamp`, `message.content`                                |
-| The transcript  | `type`, `attributionMcpServer`, `attributionMcpTool`, `timestamp`, `message.role`, `message.content`, and per block `type`, `text`, `id`, `name`, `input`, `tool_use_id`, `content` |
-| The directory   | `.claude/projects/session/<uuid>.jsonl`, `<uuid>/subagents/*.jsonl`, `outputs/` |

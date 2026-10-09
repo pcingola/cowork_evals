@@ -394,7 +394,7 @@ class Docker:
             "--env",
             f"HOME={CONTAINER_HOME}",
             # The process in the container is the harness itself, with no wrapper to
-            # export the enablement variable. docs/plugin_eval.md.
+            # export the enablement variable. docs/docker.md.
             "--env",
             ENABLEMENT_ENV,
             *(["--env", f"TZ={zone}"] if (zone := host_zone()) is not None else []),

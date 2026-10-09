@@ -18,7 +18,7 @@ skill.
 | `references/structure.md`   | The plugin and skill tree, and what each directory is for            |
 | `references/frontmatter.md` | Every frontmatter field, and what the description has to do         |
 | `references/body.md`        | The `SKILL.md` body and its progressive-disclosure budget            |
-| `references/cli.md`         | The shell wrapper and the Python package, for a skill with code      |
+| `references/wrapper.md`     | The shell wrapper and the Python package, for a skill with code      |
 | `references/runtime.md`     | Python, commands, Node and environment variables in a CoWork session |
 | `references/pip_freeze.txt` | `pip freeze` in a session: every Python package and its version      |
 | `references/checklist.md`   | The review checklist, sections A to H                                |
@@ -46,7 +46,7 @@ call reaches. Code that neither reaches is not checked.
 3. Scaffold the skill directory, `<plugin>/skills/<skill>/`, per `references/structure.md`.
 4. Write `SKILL.md`: frontmatter per `references/frontmatter.md`, body per
    `references/body.md`.
-5. If the skill has scripts, write the wrapper and the package per `references/cli.md`. Keep
+5. If the skill has scripts, write the wrapper and the package per `references/wrapper.md`. Keep
    every import, command and variable within `references/runtime.md`.
 6. If the skill carries code, write its tests in `<plugin>/tests/` and run them with
    `cowork_evals test --docker <plugin>/tests`.

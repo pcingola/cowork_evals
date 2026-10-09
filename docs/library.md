@@ -7,8 +7,7 @@ owns the plugins installs this one, points the `cowork_evals` command at its own
 keeps its cases, its configuration and its logs. This file is the boundary between the two: what
 the package ships, how a consumer installs and pins it, what the one configuration file holds,
 which rule binds which code, and where a run writes what it produces. The command surface is
-[cli.md](cli.md), and which parts of it are built is the status table in
-[running_evals.md](running_evals.md).
+[cli.md](cli.md), and which parts of it are built is [status.md](status.md).
 
 ## The two repositories
 
@@ -93,45 +92,40 @@ once. What they hold, and how they differ, is [environments.md](environments.md)
 ## The skills
 
 `src/cowork_evals/data/skills/` holds the shipped Claude Code skills, one directory per skill.
-They are the shipped files whose reader is a model rather than a person. `cowork_evals init`
+Their reader is a model. `cowork_evals init`
 copies each directory whole to `.claude/skills/<name>/` in the consumer's repository, which is
 where a Claude Code session picks up a project skill. A skill is its `SKILL.md` and every file
 beside it. The directory name is the skill name, so
 the two cannot drift, and adding a skill is adding a directory: nothing in the verb names one.
 
-There are three, and the rule that separates them is which question fires them. A question
+The rule that separates them is which question fires them. A question
 about a case, a grader or the command is the first. A question only a running session can
 settle is the second. A question about the consumer's own skill, its layout or whether its code
 runs in a session, is the third.
 
-| Skill          | Fires on                                                                                                                          | Holds                                                                             |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `cowork-evals` | Writing or fixing an eval case, a grader, a check or a plugin's tests, configuring `cowork_evals.yaml`, and running any `cowork_evals` command | The case tree, the addressability keys, the grader types and idioms, the authoring traps, the exit codes, the runtime constraint, and where to read which cases to write: [eval_design.md](eval_design.md) |
-| `cowork-ask`   | A question about what a live CoWork session does, a claim that has to be confirmed in the product, a failing `cowork_evals ask`    | The verb, what one ask costs, and the rule that the session is asked to do the thing and what it did is read back |
-| `cowork-skill-author` | Creating, reviewing or validating a skill, and whether plugin code runs in a session | The plugin and skill layout, the frontmatter and wrapper conventions, the review checklist, a condensed [runtime.md](runtime.md) and the session's `pip freeze` |
+| Skill                 | Fires on                                                                                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cowork-evals`        | Writing or fixing an eval case, a grader, a check or a plugin's tests, configuring `cowork_evals.yaml`, and running any `cowork_evals` command |
+| `cowork-ask`          | A question about what a live CoWork session does, a claim that has to be confirmed in the product, a failing `cowork_evals ask`               |
+| `cowork-skill-author` | Creating, reviewing or validating a skill, and whether plugin code runs in a session                                                          |
 
-`cowork-evals` is a condensed [eval_format.md](eval_format.md) and [cli.md](cli.md).
-`cowork-ask` is a condensed [cli.md](cli.md), [cowork_driver.md](cowork_driver.md) and
-[cowork_desktop.md](cowork_desktop.md). `cowork-skill-author`'s runtime references are a
-condensed [runtime.md](runtime.md). All three are condensed because a skill is read into a
-context window every time it fires, and the full documents are one `cowork_evals docs` away.
+A skill is `SKILL.md` and `references/`. `SKILL.md` holds the procedure and a table that names
+the reference answering each question. It states no fact that a reference holds. A skill never
+sends its reader to `docs/` or to `cowork_evals docs`.
 
-These files and the documents they condense are the one place in this repository where the
-same fact is written twice. The rule that keeps them in step is that a skill states no fact of
-its own about this package or about CoWork: every such rule is in a document, the skill carries
-the short form, and a change to a rule is made in the document first. A rule of that kind that
-exists only in a skill is a defect.
+Each fact has one home, and the rule that decides it is whether this package implements or
+measures the fact.
 
-The split has one other side. A convention for the consumer's own plugin, one this package
-neither implements nor measures, lives in the skill that teaches it and in no document: the
-Agent Skills frontmatter, the plugin and skill layout, the shell wrapper and package form, and
-the review checklist in `cowork-skill-author`. `docs/` describes this package and what it
-measured, and a consumer's code conventions are neither.
+| The fact is                                                 | Its one home                                   | The skill carries                    |
+| ----------------------------------------------------------- | ---------------------------------------------- | ------------------------------------ |
+| About this package or about CoWork, and a consumer acts on it | A consumer file in `docs/`, listed in [README.md](README.md) | `references/<file>`, a symlink to it |
+| A convention for the consumer's own plugin, which this package neither implements nor measures | The skill that teaches it: the frontmatter, the plugin and skill layout, the wrapper, the review checklist in `cowork-skill-author` | the file itself |
+| Package data                                                | `src/cowork_evals/data/`                       | `references/<file>`, a symlink to it |
 
-A data file a skill carries is a symlink to the one file the package already holds, never a
-copy. `cowork-skill-author`'s `references/pip_freeze.txt` links to
-`src/cowork_evals/data/requirements.txt`, so re-capturing the pins changes the skill with no
-second edit. The wheel build and `init` both write the file the link names.
+A reference that shares a name with a file in `docs/` is that file through a symlink, never a
+copy. A consumer file links only to consumer files that every skill linking it also links, so
+each link resolves in `docs/` and in each skill's `references/`. Both rules are enforced by a
+test. The wheel build and `init` both write the file a link names.
 
 Where the verb writes the skills, and how it replaces them after an upgrade, is
 [cli.md](cli.md). This repository is not a consumer, so its own `.claude/skills/` is generated
@@ -145,9 +139,8 @@ code under test may import is [runtime.md](runtime.md). None of that is derivabl
 module source, so a consumer without this tree is reading a command with no reference.
 
 The tree ships whole, so there is no ship list to curate and no decision to take when a
-document is added. `docs/claude_code/` is included: it is the authority where
-[eval_format.md](eval_format.md) is silent, and a consumer needs the field reference for the
-same reason this repository vendored it.
+document is added. `docs/claude_code/` is included: it is the harness reference
+[plugin_eval.md](plugin_eval.md) is written from.
 
 `docs/` sits at the repository root and hatchling places it at `cowork_evals/docs/` in the
 wheel, so nothing moves in the checkout. `cowork_evals docs` prints where it landed. See
@@ -234,8 +227,7 @@ Nothing in this package runs in a session. It drives CoWork from outside, so no 
 reaches it: not the interpreter version, not the wheel set, not the image.
 
 Enforcing the first two rows on the code under test is a separate check from running an eval.
-Whether that check is designed or built is the status table in
-[running_evals.md](running_evals.md).
+Whether that check is designed or built is [status.md](status.md).
 
 ## The two roots
 

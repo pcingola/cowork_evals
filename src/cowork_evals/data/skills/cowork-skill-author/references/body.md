@@ -22,7 +22,7 @@ Skills load in three tiers:
 | Resources    | any                 | `references/`, `scripts/`, `assets/`, `resources/`, when read |
 
 Anything long, rarely needed, or needed only in one sub-task goes in a reference file the body
-links to. References are one level deep: `SKILL.md` links to `references/topic.md`, and a
+links to. References are one level deep: `SKILL.md` links to `references/<topic>.md`, and a
 reference links to no other reference.
 
 ## Principles
@@ -30,7 +30,7 @@ reference links to no other reference.
 - Agent-facing only. Implementation and architecture belong in the project's documentation.
 - State the outputs: where files are written, and in what format.
 - State non-obvious behaviour, for example "batch correction is off by default".
-- Every path is relative to the skill root, such as `references/topic.md`, and the file exists.
+- Every path is relative to the skill root, such as `references/<topic>.md`, and the file exists.
 - No link leaves the skill directory. The skill ships alone, so such a link resolves only in the
   authoring tree. Inline a rule that lives in a project document.
 - An asset the skill's output references ships with the skill. A generated HTML file that points

@@ -77,7 +77,7 @@ BASELINE_HEADING = "BASELINE TRAJECTORY:"
 NEW_HEADING = "NEW TRAJECTORY:"
 
 # The check judge's grant, and what it is shown. It reads files and never writes one, so the
-# three read-only tools are the whole grant. docs/checks.md.
+# three read-only tools are the whole grant. docs/checks_layer.md.
 CHECK_TOOLS = ("Read", "Glob", "Grep")
 FILES_OPEN = "--- FILES ---"
 FILES_CLOSE = "--- END FILES ---"

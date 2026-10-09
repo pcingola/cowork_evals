@@ -4,139 +4,152 @@
 
 `claude plugin eval` is Claude Code's own eval harness, shipped inside the `claude` CLI. It
 loads one plugin into a fresh isolated `claude -p` session, runs each case several times, and
-scores the result with graders. This repository does not own it, and a consumer never invokes
-it: the container backend runs it, and the CoWork backend does not run it at all. This file
-records what the harness does, so that a case author knows which failures come from the harness
-and cannot be fixed by editing a case.
+scores the result with graders. A consumer never invokes it: `cowork_evals run --docker` runs
+it, and `--cowork` does not run it at all. The graders it defines are the graders on both
+backends.
 
-- **Early access, enabled per organization.** A build without early access prints that and
-  exits 1. The command exists either way.
-- **Only the plugin under test loads.** No user or project settings, no `CLAUDE.md`, no other
-  plugins, no personal MCP servers.
-- **Tools need an explicit grant.** `Bash`, `Write`, `Edit`, `WebFetch`, `WebSearch` and
-  `mcp__*` are outside the read-only set.
-- **Its defaults are wrong for this repository**, which is why
-  [running_evals.md](running_evals.md) pins a flag list rather than accepting them.
-
-What a case file contains is [eval_format.md](eval_format.md), the authoring contract for both
-backends. A limit a case author can work around is there; the ones here cannot be worked around.
-
-Written against CLI 2.1.259. The container backend installs 2.1.265, because 2.1.259 cannot run
-a Bash-granting case on Linux: [docker.md](docker.md) records the failure. The command is in
-early access and is not publicly documented, so `claude plugin eval --help` in your own build is
-the authority when this file and the CLI disagree.
-
-This file is a summary. Anthropic's own full reference is vendored at
-[`claude_code/`](claude_code/README.md), which is the authority for any detail omitted here and
-records which CLI version the vendored copies came from. `docs/claude_code/eval_smoke/` is a
-runnable plugin, written here, that proves the harness works.
-
-## Availability
-
-Enabled per organization. When it is not enabled, the command prints that it is in early access
-and exits 1. The command exists either way; a build without early access is not a missing
-feature.
-
-Enablement is the `tengu_walnut_spire` per-organization rollout flag. Enabled first-party
-clients pick it up after `claude update` and a fresh session.
-
-**A client that cannot fetch server-side flags must set `CLAUDE_CODE_WALNUT_SPIRE=1`.** That
-covers Bedrock, Vertex, Foundry, any client with a custom `ANTHROPIC_BASE_URL`, and any client
-with `DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or
-`DISABLE_GROWTHBOOK` set. It needs CLI 2.1.207 or later.
-
-The container backend sets it inside the container, so a consumer sets nothing by hand:
-
-```sh
-export CLAUDE_CODE_WALNUT_SPIRE=1
-```
-
-It cannot be committed to a repository's `.claude/settings.json` `env`. Only allowlisted
-variables apply from project settings, this one is not allowlisted, and `claude plugin ...` run
-from a shell or CI does not pass trust anyway. Set it in the shell, in CI, in
-`~/.claude/settings.json` under `env`, or in managed settings.
-
-Self-test from an empty directory:
-
-| Output                | Means            |
-| --------------------- | ---------------- |
-| `early access`        | Not enabled here |
-| `No eval cases found` | Enabled          |
-
-## The cases it reads
-
-Cases live under the plugin's eval directory, `evals/` by default. `--eval-dir` and the
-manifest's `experimental.evals` move it, and this repository moves neither. The file format is
+This file holds each grader type's fields and how each one decides, the ablation arms, the
+limits a case cannot fix, and what a run costs. What a case file contains is
 [eval_format.md](eval_format.md).
 
-Left alone the CLI writes `aggregate-result.json` and `report.html` to
-`<eval dir>/results/<timestamp>/`, inside the consumer's checkout. Every backend here pins
-`--output-dir` at the run's log directory instead, so nothing is written under a plugin. See
+- Only the plugin under test loads. No user or project settings, no `CLAUDE.md`, no other
+  plugins, no personal MCP servers.
+- Tools need an explicit grant. `Bash`, `Write`, `Edit`, `WebFetch`, `WebSearch` and `mcp__*`
+  are outside the read-only set.
+- The command is in early access and is not publicly documented. `claude plugin eval --help`
+  in the installed build is the authority when this file and the CLI disagree.
+
+## Grader fields
+
+The keys every grader takes, and the values of `target` and `focus`, are
+[eval_format.md](eval_format.md#graders). The file body is the pattern for `regex` and the
+criteria for `llm` and `baseline`.
+
+| Type          | Fields                                                                                                                                                       | Passes when                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `regex`       | `pattern`, JavaScript RegExp source. `flags`, from `d g i m s u v y` only. `match`: `contains` (default), `not_contains`, `count:N`. `target`                 | The pattern is found, is not found, or is found exactly N times                                   |
+| `tool_used`   | `tool`, the name as the trace shows it. `input_match`, a regex over the JSON-encoded tool input. `min` (default 1). `max` (default unlimited)                 | The number of matching calls is within `min..max`                                                 |
+| `tool_order`  | `before`, `after`. Each is a tool name or `{tool, input_match}`                                                                                              | Both were called, and the first matching `before` call precedes the first matching `after` call   |
+| `file_exists` | `path`, a glob over created files: `**/` is any depth, `*` is within one segment. `exists` (default true)                                                    | A created file matches, or none does with `exists: false`                                         |
+| `llm`         | `criteria`, the rubric, which is the file body. `focus`                                                                                                      | A judge votes PASS in at least 2 of 3 votes                                                       |
+| `baseline`    | `baseline_file`, a `.jsonl` trace in the case directory. `criteria`                                                                                          | The judge finds the new trajectory meets the criterion at least as well as the baseline, 2 of 3   |
+
+### regex
+
+There is no inline `(?i)`. Use `flags: i`.
+
+`pattern` is JavaScript RegExp source, so `^` and `$` match the start and end of the whole
+target, not of a line, unless `flags` has `m`. This differs from Python, where `$` also matches
+before a trailing newline. On Node 25.9.0, over `^\s*(?:blocker|major|minor)\s*$`:
+
+| Target                    | no flags | `m`  |
+| ------------------------- | -------- | ---- |
+| `blocker`                 | pass     | pass |
+| `blocker\n`               | pass     | pass |
+| `  minor  `               | pass     | pass |
+| `minor.`                  | fail     | fail |
+| `The severity is blocker` | fail     | fail |
+| `blocker\nmajor`          | fail     | pass |
+| `line one\nblocker`       | fail     | pass |
+
+A trailing newline passes because `\s*` consumes it, not because `$` matches before it. A
+pattern with no `\s*` over a target that ends in a newline fails.
+
+Over `trace`, quotes and newlines are JSON-escaped: match `\"`, not `"`.
+
+A `regex` over an image always fails. Over another binary it matches only ASCII sequences, and
+non-ASCII bytes decode to U+FFFD.
+
+### tool_used
+
+`tool` is the trace name: `Skill`, `Read`, `Edit`, or `mcp__plugin_<plugin>_<server>__<tool>`
+for a plugin MCP tool.
+
+A must-not-call assertion is `min: 0, max: 0`. `max: 0` alone never passes, because `min`
+stays 1.
+
+The skill fired:
+
+```yaml
+type: tool_used
+tool: Skill
+input_match: '"skill"\s*:\s*"(?:[\w-]+:)?<skill>"'
+```
+
+To check that a build or a test passed, have the agent run it and write the outcome to a file,
+grade the file, and assert the command ran with `tool_used` and `input_match`. A compound shell
+command is denied as a whole, so grant each command form the run uses, such as
+`Bash(npm test:*)`.
+
+### file_exists
+
+It sees only files created during the run. A file that already existed, a file a scaffold
+created, and a file the agent modified are invisible to it. Grade the contents, or assert a
+`tool_used` on `Edit`.
+
+### llm
+
+The judge is a small fast model unless `--judge-model` or `eval.judge_model` names another. It
+sees up to 100k characters of the focus, head and tail kept. On `trace` it sees the first and
+last 12 messages. Above about 8000 characters its verdicts get noisy: prefer a `regex` over
+`{source: file, path}` for a long artifact. Write the rubric as concrete, checkable claims.
+
+`target` on an `llm` grader is ignored. The key is `focus`.
+
+| Focus file                                                      | The judge                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------ |
+| UTF-8 text                                                      | Reads it. A leading BOM is dropped                                 |
+| PNG, JPEG, GIF or WebP, detected from bytes                     | Is shown the image, downscaled. On `--cowork` the grader is a skip |
+| `.pptx`, `.docx`, `.xlsx`, PDF, UTF-16, any file with NUL bytes | Is not asked. The grader is refused                                |
+| A truncated or corrupt image                                    | Is not asked. The grader fails                                     |
+
+Grade a deck or a diagram by rendering it to an image or by writing its content out as UTF-8
+text. The vision judge grades what is visible. To assert that an artifact does not contain
+something, use `regex` with `not_contains` over a text rendering. A judge that reads a binary
+file itself is `run.judge` in a check: [checks.md](checks.md#asking-a-judge).
+
+### Choosing
+
+- Prefer a structural grader. `llm` and `baseline` vary from run to run, and are noisy on long
+  inputs.
+- Grade the outcome, a file's contents or the final message, and the mechanism, a `tool_used`
+  or `tool_order` on the trace.
+- Do not depend on a live third-party response.
+
+## Ablation arms
+
+Under `--ablation with-without` each case runs with the plugin and with no plugin. It is off
+by default and runs on `--docker` only. How the delta decides a case is
 [running_evals.md](running_evals.md).
 
-## Running
+`arm` selects which arm scores a grader: `with-only` or `both`. A grader with
+`arm: with-only`, and a `tool_used` on `Skill` with no `arm`, is dropped from the without-arm
+and is not scored in either arm. It is reported as an indicator. When every grader of a case
+is with-only, they are scored normally.
 
-```
-claude plugin eval [target] [--case glob] [--tag t...] [--runs n] [--model m]
-                   [--judge-model m] [--max-cost-usd usd] [--eval-dir dir]
-                   [--output-dir dir] [--json [file]] [--threshold 0..1]
-                   [--allow-tools t...] [--scaffold|--no-scaffold]
-                   [--ablation none|with-without] [--mocks record|off]
-                   [--keep-temp] [--verbose] [--report path]
-                   [--publish-report|--no-publish]
-```
+`arm: both` scores a `Skill` grader in both arms, such as a `min: 0, max: 0` must-not-fire
+grader. Without ablation nothing is excluded, so a `tool_used: Skill` grader is scored and can
+fail the run. A case that never runs under ablation sets `arm` only to stay portable.
 
-The target is a path, an installed plugin name, or `name@marketplace`. Put it before `--tag`,
-`--allow-tools` and `--json`: those are variadic and will swallow a trailing target. Every
-backend here passes a path.
+## Limits a case cannot fix
 
-Exit codes: 0 every case at or above the threshold (default 1.0); 1 below threshold, load
-error, no cases, bad options; 2 partial, meaning the cost ceiling was hit or the credential was
-rejected; 130 interrupted; 143 terminated.
-
-## Flags worth pinning
-
-| Flag             | Harness default                                           | Behaviour behind it                                                                                                                                                                             |
-| ---------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--model`        | the case's `execution.model`, else the child's own default | `ANTHROPIC_MODEL` is not inherited by the agent under test. Unpinned, a model rollout reads as a regression                                                                                      |
-| `--judge-model`  | a small fast model                                         | The same, for the graders                                                                                                                                                                       |
-| `--ablation`     | `none` for a path target, `with-without` for a named plugin | The baseline arm doubles the agent runs and demotes `tool_used: Skill` graders to unscored indicators. Pinning it means a target that is later named rather than pathed does not silently change the score |
-| `--threshold`    | `1.0`                                                      | At `0` the harness fails nothing, which is what hands pass and fail to this package                                                                                                              |
-| `--max-cost-usd` | no ceiling                                                 | Spend backstop. Hitting it exits 2 with partial results                                                                                                                                         |
-| `--output-dir`   | `<eval dir>/results/<timestamp>/`                          | Puts `aggregate-result.json` and `report.html` in a log directory rather than under the plugin                                                                                                   |
-| `--no-publish`   | publish attempted when the account can                     | The HTML report is otherwise published to claude.ai                                                                                                                                             |
-| `--no-scaffold`  | scaffold off                                               | `context.scaffold_script` is author-supplied shell and runs as the invoking user                                                                                                                |
-| `--keep-temp`    | off                                                        | Without it only an errored run's sandbox survives. A run that merely scored low is deleted with its `trace.jsonl`, so there is nothing to read after a failure                                   |
-| `--verbose`      | off                                                        | Extra trace logging reaches the debug log only. Nothing extra reaches the terminal                                                                                                               |
-
-Do not pass `--json`. It silences progress lines, per-case grader lines, notices and the summary
-table, and an errored run's sandbox is not kept. `--output-dir` gives the same document with
-none of that loss.
-
-A run's sandbox is created under `TMPDIR`, so where a kept sandbox lands is the caller's to
-choose. That is how the container backend gets one onto the host: [docker.md](docker.md). A kept
-sandbox is left read-only, with the two trees the plugin under test wrote at mode 000 under
-`sealed/`, and `out/trace.jsonl` readable beside them, against the CLI the image installs.
-
-## Limits a case author has to know
-
-Each of these has a silent failure mode, and none can be fixed by editing the case. The ones
-that can are in [eval_format.md](eval_format.md).
+Each of these fails silently, and none is fixed by editing the case. The ones a case can fix
+are [eval_format.md](eval_format.md#authoring-traps).
 
 - **Only the plugin under test loads.** No user or project settings, no `CLAUDE.md`, no other
   plugins, no personal MCP servers.
-- **Tools need an explicit grant.** The effective set is the case's `allowed_tools` intersected
-  with the read-only set, unioned with the operator's `--allow-tools`. `Bash`, `Write`, `Edit`,
+- **Tools need an explicit grant.** The effective set is the case's `allowed_tools`
+  intersected with the read-only set, unioned with `eval.allow_tools`. `Bash`, `Write`, `Edit`,
   `WebFetch`, `WebSearch` and `mcp__*` are outside the read-only set. A plugin's own MCP tools
-  are named `mcp__plugin_<plugin>_<server>__<tool>`. On CLI 2.1.265 a case writing no
-  `allowed_tools` still has `Skill`, and its skill fires and scores under an operator grant of
-  `Bash` alone, so the intersection does not empty the read-only set. What was measured tool by
-  tool is [running_evals.md](running_evals.md).
+  are named `mcp__plugin_<plugin>_<server>__<tool>`. A case writing no `allowed_tools` still
+  has `Skill`, and its skill fires and scores under a grant of `Bash` alone. What was measured
+  tool by tool is [running_evals.md](running_evals.md).
 - **`Monitor`, `EnterWorktree` and `ExitWorktree` are never available.** Granting one is
   reported as not granted.
-- **An ungranted tool fails in two ways.** It is offered and refused at the call, which writes a
-  `system` record of subtype `permission_denied` carrying `decision_reason_type`, or it is not
-  offered at all, which writes nothing. Both are silent to a grader.
+- **An ungranted tool fails in two ways.** It is offered and refused at the call, which writes
+  a `system` record of subtype `permission_denied` carrying `decision_reason_type`, or it is
+  not offered at all, which writes nothing. Both are silent to a grader. `cowork_evals` reads
+  the kept trace for both and fails the run: [running_evals.md](running_evals.md).
 - **Granting `Bash` turns on the OS sandbox.** On a machine with no sandbox backend the run is
   refused rather than run unconfined.
 - **The Artifact tool is unavailable in a run.** A skill that ends by publishing cannot be
@@ -145,14 +158,8 @@ that can are in [eval_format.md](eval_format.md).
   from an unmanaged one by exactly that policy.
 - **Network reach is not uniform.** The plugin's own hooks and MCP servers run as the invoking
   user, unconfined, with normal network access. A command in a granted `Bash` call runs under
-  the OS sandbox and reaches only the domains an `--allow-tools "WebFetch(domain:...)"` grant
-  names.
-
-## Proving the harness works
-
-`docs/claude_code/eval_smoke/run.sh` is a throwaway plugin with two skills, three cases and four
-grader types. It calls `claude plugin eval` directly, with no wrapper from this repository, so
-it separates a harness problem from a runner problem.
+  the OS sandbox and reaches only the domains a `WebFetch(domain:...)` grant in
+  `eval.allow_tools` names.
 
 ## Cost
 
@@ -160,9 +167,8 @@ Agent runs are `cases x runs x arms`. Each `llm` or `baseline` grader adds three
 Structural graders are free.
 
 A 10-case suite at `runs: 3` with the baseline arm on is 60 agent runs before a single judge
-call. That is why `eval.ablation` is `none` in this repository and `with-without` is asked for
-one sweep at a time. The option is [running_evals.md](running_evals.md).
+call. `eval.ablation` is `none` by default, and `with-without` is asked for one sweep at a time.
 
-Measured over `docs/claude_code/eval_smoke/`, three cases at `runs: 1`, one `llm` grader, under
-`--ablation with-without`: six agent runs, 34 s and 0.35 USD. The one-arm number for the same
-tree is half the agent runs.
+Measured over three cases at `runs: 1`, one `llm` grader, under `--ablation with-without`: six
+agent runs, 34 s and 0.35 USD. The one-arm number for the same tree is half the agent runs.
+The ceilings are [running_evals.md](running_evals.md).

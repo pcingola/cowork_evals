@@ -13,7 +13,7 @@ with it, and what outlives that deletion lives here.
 
 Nothing here decides pass or fail. `outcome` is the word [verdict.py](verdict.py) reached on
 the same document, carried across unchanged. Nothing here prints either: the three renders
-return strings and [cli.py](cli.py) writes them. docs/panel.md.
+return strings and [cli.py](cli.py) writes them. docs/panel.md, docs/case_history.md.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from .verdict import OUTCOME_DECLARED, OUTCOME_PASS, CaseOutcome, display
 
 # The record schema. It is this module's own and is not the result document's: the contract is
 # additive-only in the same way, so a reader ignores a field it does not know and a line of
-# another version is not read. docs/panel.md.
+# another version is not read. docs/case_history.md.
 SCHEMA_VERSION = 1
 
 # One case's file, under the history root.

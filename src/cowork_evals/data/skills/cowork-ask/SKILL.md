@@ -12,45 +12,25 @@ and no run directory.
 Use it when the answer is a fact about the deployed product. Do not use it to check anything
 a file already states, and do not use it in place of `cowork_evals run`.
 
-`cowork_evals docs` prints the shipped documentation. Every rule below is in one of those
-files, and the right column names the file that owns it.
+Read the reference that answers the question before acting on it.
 
-| Question                                       | Read                   |
-| ---------------------------------------------- | ---------------------- |
-| The verb, its options and its exit codes       | `docs cli`             |
-| What the driver does, and what it refuses      | `docs cowork_driver`   |
-| What the application writes, and where         | `docs cowork_desktop`  |
-| What the CoWork backend can and cannot honour  | `docs approaches`      |
-| What a session may import                      | `docs runtime`         |
+| Question                                                   | Read                           |
+| ---------------------------------------------------------- | ------------------------------ |
+| The verb, its options, its output, its cost, exit codes    | `references/ask.md`            |
+| The session document, the ceilings, every driver code      | `references/cowork_driver.md`  |
+| What the application writes, how a skill loads, the grants | `references/cowork_desktop.md` |
+| What the CoWork backend can and cannot honour              | `references/approaches.md`     |
+| What a session may import, run and read                    | `references/runtime.md`        |
+| Every Python package a session has                         | `references/pip_freeze.txt`    |
 
 ## Steps
 
-1. Confirm no file states the answer: `cowork_evals docs`, then the document that owns it.
+1. Confirm no reference states the answer: read the one the table above names.
 2. Write a prompt that makes the session do the thing, per the table below.
 3. `cowork_evals ask --cowork --dry-run "<prompt>"` when the prompt is long or built by hand.
 4. `cowork_evals ask --cowork "<prompt>"`, once.
 5. Read what the session did: `outputs`, `tools`, or `tool_calls` under `--json`.
 6. Re-read with `--session <dir>`, never by asking again.
-
-## The command
-
-```bash
-cowork_evals ask --cowork "Reply with the single word: ready"
-cowork_evals ask --cowork --dry-run "..."      # the deep link and the ceiling. Spends nothing
-cowork_evals ask --cowork --json "..."         # the session document instead of the text
-cowork_evals ask --cowork --session <dir>      # a session already on disk. Submits nothing
-```
-
-The answer is stdout. The session directory, the assistant turn count, the tool names, the
-outputs and the driver log are stderr, so a redirect captures the answer alone.
-
-## What it costs
-
-One ask costs a VM boot, one submission against `cowork.max_runs`, and the keyboard for the
-length of the run, because the submission is a synthetic Return to the frontmost window.
-
-Ask once. Use `--dry-run` first when the prompt is long or built by hand. Use `--session` to
-re-read a session already on disk instead of submitting again.
 
 ## Ask it to act, and read what it did
 
@@ -63,7 +43,7 @@ from its prompt and from habit, and both go stale.
 | Can it write a file?          | write one, at a named path, with named contents           | `outputs` in the footer |
 | Can it run a shell command?   | run one whose output cannot be guessed                    | `tools`, then the text  |
 | Which tools does it have?     | use the tool                                              | `tools` in the footer   |
-| Does a skill fire?            | give it the request the skill's own description triggers on | `tool_calls` under `--json`. There is no `Skill` tool in a session: it reads `SKILL.md` over the mount, which `docs cowork_desktop` records |
+| Does a skill fire?            | give it the request the skill's own description triggers on | `tool_calls` under `--json`. There is no `Skill` tool in a session: it reads `SKILL.md` over the mount, which `references/cowork_desktop.md` records |
 
 `--json` prints the whole session document, and `tool_calls` in it carries each call's input
 and its result. That is what a claim about a tool is checked against.
@@ -73,10 +53,4 @@ way to get a different answer.
 
 ## When it fails
 
-`cowork_evals ask` exits 3 when the preflight is unmet or the driver refused before
-submitting, and the message names what to fix. Exit 1 is everything else the driver raised,
-and the driver's codes are in `cowork_evals docs cowork_driver`.
-
-`cowork_evals check --cowork` reports what the backend is missing. The authorizations it
-cannot report, including the macOS Accessibility grant, are in
-`cowork_evals docs cowork_desktop`.
+Read the exit code and the driver code in `references/ask.md` and `references/cowork_driver.md`.

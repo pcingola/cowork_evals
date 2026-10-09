@@ -501,7 +501,7 @@ def test_the_cowork_key_and_not_its_value_decides_the_backend(tmp_path: Path) ->
 
 # The two validity checks, over traces written by the test.
 
-# The two records the checks read, in the shape docs/running_evals.md records. A hook denial
+# The two records the checks read, in the shape docs/run_pipeline.md records. A hook denial
 # is the same record with another reason, which is the plugin's own behaviour and not the
 # container failing to behave like a session.
 GRANT = ("Bash", "Read", "Glob", "Grep", "Write", "Edit", "WebFetch", "Skill")

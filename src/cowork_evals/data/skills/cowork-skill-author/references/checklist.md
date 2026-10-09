@@ -64,7 +64,7 @@ The rules are in `body.md`.
 ## D. Shell wrapper _(code)_
 
 - **D1.** `scripts/<name>.sh` exists and is executable.
-- **D2.** It has the form in `cli.md`: `#!/bin/bash -eu`, `set -o pipefail`, `SCRIPT_DIR` from
+- **D2.** It has the form in `wrapper.md`: `#!/bin/bash -eu`, `set -o pipefail`, `SCRIPT_DIR` from
   `$0`, then `exec env PYTHONPATH="$SCRIPT_DIR" python3 -m <name>_tool "$@"`.
 - **D3.** `<wrapper> --help` exits 0.
 
