@@ -548,8 +548,8 @@ def add_spend(entry: dict[str, Any], spent: float, key: str = RUN_SPEND) -> None
 def score(run: dict[str, Any]) -> float:
     """The weighted fraction of scored grader results that passed. Zero when there are none.
 
-    It is `results.Run.score` over the document rather than over the dataclass, because what
-    is scored here is a document the harness may have written.
+    It is the rule `RunEntry.graded` scores by, over the document's `scored` flags, because
+    what is scored here is a document the harness may have written.
     """
     scored = [
         result
@@ -615,8 +615,8 @@ def run(output_dir: Path | str, root: Path | str, *, judge_model: str) -> list[s
     add_spend(document, spent, SUITE_SPEND)
     _recount(document)
     try:
-        results.write(directory, document)
-    except OSError as error:
+        results.write(directory, results.ResultDocument.model_validate(document))
+    except (OSError, ValueError) as error:
         return [*warnings, f"{path}: the check results could not be written: {error}"]
     return warnings
 

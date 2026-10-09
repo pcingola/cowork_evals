@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import logs, results
+from . import logs
 from .cowork import OUTPUTS as SESSION_OUTPUTS
 from .cowork import final_text
 from .harness import RESULT_NAME
@@ -501,7 +501,8 @@ def _document(output_dir: Path) -> tuple[dict[str, Any], str | None]:
 
 def _rewrite(output_dir: Path, document: dict[str, Any]) -> list[str]:
     try:
-        results.write(output_dir, document)
+        written = json.dumps(document, indent=2) + "\n"
+        (output_dir / RESULT_NAME).write_text(written, encoding="utf-8")
     except OSError as error:
         return [f"{output_dir / RESULT_NAME}: the collected paths could not be written: {error}"]
     return []

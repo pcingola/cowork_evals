@@ -12,12 +12,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from cowork_evals.cases import Case, Grader, ToolUsedConfig, read
 from cowork_evals.cowork import SessionDocument
 from cowork_evals.grader import GraderResult
 from cowork_evals.harness import RESULT_NAME
-from cowork_evals.results import CaseResult, Run, build, write
+from cowork_evals.results import CaseEntry, ResultDocument, RunEntry, build, write
 
 DATA = Path(__file__).resolve().parent.parent / "data"
 TREE = DATA / "cases" / "tree"
@@ -52,15 +53,21 @@ def case(name: str, **frontmatter: Any) -> Case:
     )
 
 
-def suite(cases: list[CaseResult], **kwargs: Any) -> dict[str, Any]:
-    return build(
-        root=TREE,
-        cases=cases,
-        started_at=STARTED,
-        duration_seconds=91.5,
-        judge_model="haiku",
-        claude_version=VERSION,
-        **kwargs,
+def dump(entry: BaseModel) -> Any:
+    return entry.model_dump(mode="json", by_alias=True)
+
+
+def suite(cases: list[CaseEntry], **kwargs: Any) -> dict[str, Any]:
+    return dump(
+        build(
+            root=TREE,
+            cases=cases,
+            started_at=STARTED,
+            duration_seconds=91.5,
+            judge_model="haiku",
+            claude_version=VERSION,
+            **kwargs,
+        )
     )
 
 
@@ -68,20 +75,20 @@ def suite(cases: list[CaseResult], **kwargs: Any) -> dict[str, Any]:
 
 
 def test_a_run_is_built_from_the_session_document() -> None:
-    run = Run.collected(session("answered"), (result("g", True),), timeout_seconds=1800.0)
-    entry = run.document()
+    run = RunEntry.collected(session("answered"), (result("g", True),), timeout_seconds=1800.0)
+    entry = dump(run)
     assert entry["turns"] == 1, "one assistant turn"
     assert entry["startedAt"] == "2026-09-09T10:00:00.000Z"
     assert entry["durationSeconds"] == 120.0
     assert entry["tracePath"].endswith("t-0001.jsonl")
     assert entry["error"] is None
     assert entry["skippedPaidGraders"] is False
-    assert entry["cowork"] == {"sessionDir": run.session_dir, "timeoutSeconds": 1800.0}
+    assert entry["cowork"] == {"sessionDir": run.cowork.session_dir, "timeoutSeconds": 1800.0}
 
 
 def test_a_session_with_no_timestamp_and_no_transcript_omits_three_fields() -> None:
     document = session("quiet").model_copy(update={"submitted_at": None})
-    entry = Run.collected(document, (), timeout_seconds=300.0).document()
+    entry = dump(RunEntry.collected(document, (), timeout_seconds=300.0))
     assert "startedAt" not in entry
     assert "durationSeconds" not in entry
     assert "tracePath" not in entry
@@ -89,14 +96,14 @@ def test_a_session_with_no_timestamp_and_no_transcript_omits_three_fields() -> N
 
 
 def test_the_score_is_the_weighted_fraction_of_scored_graders() -> None:
-    run = Run(graders=(result("a", True, 3), result("b", False, 1)))
+    run = RunEntry.graded(graders=(result("a", True, 3), result("b", False, 1)))
     assert run.score == 0.75
     assert run.passed is False
-    assert Run(graders=(result("a", True), result("b", True))).passed is True
+    assert RunEntry.graded(graders=(result("a", True), result("b", True))).passed is True
 
 
 def test_a_skipped_grader_is_not_scored() -> None:
-    run = Run(
+    run = RunEntry.graded(
         graders=(
             result("a", True),
             result("b", False, skipped=True, skip_reason="no stand-in serves a CoWork run"),
@@ -104,7 +111,7 @@ def test_a_skipped_grader_is_not_scored() -> None:
     )
     assert run.score == 1.0
     assert run.passed is True
-    entry = run.document()["graders"]
+    entry = dump(run)["graders"]
     assert entry[0]["scored"] is True
     assert entry[1] == {
         "name": "b",
@@ -119,19 +126,19 @@ def test_a_skipped_grader_is_not_scored() -> None:
 
 
 def test_a_run_with_nothing_to_score_is_zero() -> None:
-    assert Run(graders=()).score == 0.0
-    assert Run(graders=()).passed is False
+    assert RunEntry.graded(graders=()).score == 0.0
+    assert RunEntry.graded(graders=()).passed is False
 
 
 def test_with_only_is_always_false() -> None:
     """`ablation` is `none` here, so nothing is dropped for an arm."""
-    entry = Run(graders=(result("a", True),)).document()
+    entry = dump(RunEntry.graded((result("a", True),)))
     assert entry["graders"][0]["withOnly"] is False
 
 
 def test_a_judged_grader_result_carries_its_votes_and_evidence() -> None:
     judged = result("tone", True, judge_votes=[True, False, True], evidence="Hello Alex.")
-    entry = Run(graders=(judged,)).document()["graders"][0]
+    entry = dump(RunEntry.graded((judged,)))["graders"][0]
     assert entry["judgeVotes"] == [True, False, True]
     assert entry["evidence"] == "Hello Alex."
 
@@ -141,8 +148,8 @@ def test_a_judged_grader_result_carries_its_votes_and_evidence() -> None:
 
 def test_a_case_records_what_it_declared_and_never_an_override() -> None:
     real = read(CASE_DIR)
-    entry = CaseResult(case=real, runs=(Run(graders=(result("a", True),), timeout_seconds=60),))
-    document = entry.document(TREE.resolve())
+    runs = (RunEntry.graded((result("a", True),), timeout_seconds=60),)
+    document = dump(CaseEntry.build(real, TREE.resolve(), runs))
     assert document["name"] == "greets-alex"
     assert document["dir"] == "evals/greeter/every-key"
     assert document["source"] == "prose"
@@ -156,13 +163,13 @@ def test_a_case_records_what_it_declared_and_never_an_override() -> None:
 
 
 def test_a_case_that_declares_none_of_the_four_omits_them() -> None:
-    document = CaseResult(case=case("bare")).document(TREE.resolve())
+    document = dump(CaseEntry.build(case("bare"), TREE.resolve()))
     for absent in ("model", "runsPerCase", "timeoutSeconds", "maxTurns"):
         assert absent not in document
 
 
 def test_a_grader_definition_fills_in_the_defaults_the_grader_applies() -> None:
-    definitions = CaseResult(case=read(CASE_DIR)).document(TREE.resolve())["graders"]
+    definitions = dump(CaseEntry.build(read(CASE_DIR), TREE.resolve()))["graders"]
     by_name = {entry["name"]: entry for entry in definitions}
     assert by_name["mentions-alex"] == {
         "name": "mentions-alex",
@@ -178,24 +185,25 @@ def test_a_grader_definition_fills_in_the_defaults_the_grader_applies() -> None:
 
 
 def test_case_aggregates_are_the_mean_score_and_the_pass_rate() -> None:
-    disagreeing = CaseResult(
-        case=case("flaky", runs=2),
-        runs=(
-            Run(graders=(result("a", True), result("b", True))),
-            Run(graders=(result("a", True), result("b", False))),
+    disagreeing = CaseEntry.build(
+        case("flaky", runs=2),
+        TREE.resolve(),
+        (
+            RunEntry.graded((result("a", True), result("b", True))),
+            RunEntry.graded((result("a", True), result("b", False))),
         ),
     )
-    assert disagreeing.score == 0.75
-    assert disagreeing.pass_rate == 0.5
-    assert disagreeing.document(TREE.resolve())["aggregates"] == {"score": 0.75, "passRate": 0.5}
+    assert disagreeing.aggregates.score == 0.75
+    assert disagreeing.aggregates.pass_rate == 0.5
+    assert dump(disagreeing)["aggregates"] == {"score": 0.75, "passRate": 0.5}
 
 
 def test_a_declared_case_submits_nothing_and_carries_its_reason() -> None:
     reason = "no-cowork: max_turns: no turn cap reaches a CoWork session"
-    unrunnable = CaseResult(
-        case=case("staged", max_turns=12), declared=True, declared_reason=reason
+    unrunnable = CaseEntry.build(
+        case("staged", max_turns=12), TREE.resolve(), declared_reason=reason
     )
-    document = unrunnable.document(TREE.resolve())
+    document = dump(unrunnable)
     assert document["declaredUnrunnable"] is True
     assert document["declaredReason"] == reason
     assert "skipped" not in document, "a declared case is not a skipped one"
@@ -206,11 +214,12 @@ def test_a_declared_case_submits_nothing_and_carries_its_reason() -> None:
 
 
 def test_a_run_the_driver_raised_on_carries_the_error_and_no_graders() -> None:
-    errored = CaseResult(
-        case=case("errored"),
-        runs=(Run(error="4: no session directory appeared", timeout_seconds=1800.0),),
+    errored = CaseEntry.build(
+        case("errored"),
+        TREE.resolve(),
+        (RunEntry.graded(error="4: no session directory appeared", timeout_seconds=1800.0),),
     )
-    entry = errored.document(TREE.resolve())["arms"]["with"][0]
+    entry = dump(errored)["arms"]["with"][0]
     assert entry["error"] == "4: no session directory appeared"
     assert entry["score"] == 0.0
     assert entry["graders"] == []
@@ -220,8 +229,9 @@ def test_a_run_the_driver_raised_on_carries_the_error_and_no_graders() -> None:
 
 
 def test_the_suite_document(tmp_path: Path) -> None:
-    passing = CaseResult(case=case("passes"), runs=(Run(graders=(result("a", True),)),))
-    failing = CaseResult(case=case("fails"), runs=(Run(graders=(result("a", False),)),))
+    root = TREE.resolve()
+    passing = CaseEntry.build(case("passes"), root, (RunEntry.graded((result("a", True),)),))
+    failing = CaseEntry.build(case("fails"), root, (RunEntry.graded((result("a", False),)),))
     document = suite([passing, failing], case_filter="pass*", tag_filters=("greeter",))
 
     assert document["schemaVersion"] == 1
@@ -250,8 +260,12 @@ def test_the_suite_document(tmp_path: Path) -> None:
 
 def test_the_suite_cost_is_the_judge_spend_alone() -> None:
     cases = [
-        CaseResult(case=case("one"), runs=(Run(judge_cost_usd=0.004),)),
-        CaseResult(case=case("two"), runs=(Run(judge_cost_usd=0.002), Run(judge_cost_usd=0.001))),
+        CaseEntry.build(case("one"), TREE.resolve(), (RunEntry.graded(judge_cost_usd=0.004),)),
+        CaseEntry.build(
+            case("two"),
+            TREE.resolve(),
+            (RunEntry.graded(judge_cost_usd=0.002), RunEntry.graded(judge_cost_usd=0.001)),
+        ),
     ]
     assert suite(cases)["costUsd"] == pytest.approx(0.007)
 
@@ -259,8 +273,8 @@ def test_the_suite_cost_is_the_judge_spend_alone() -> None:
 def test_a_declared_case_leaves_all_four_aggregates() -> None:
     """It is in `cases`, and out of `casesTotal`, `casesPassed` and both means."""
     cases = [
-        CaseResult(case=case("runs"), runs=(Run(graders=(result("a", True),)),)),
-        CaseResult(case=case("declared"), declared=True, declared_reason="no-cowork"),
+        CaseEntry.build(case("runs"), TREE.resolve(), (RunEntry.graded((result("a", True),)),)),
+        CaseEntry.build(case("declared"), TREE.resolve(), declared_reason="no-cowork"),
     ]
     document = suite(cases)
     assert len(document["cases"]) == 2
@@ -274,7 +288,7 @@ def test_a_declared_case_leaves_all_four_aggregates() -> None:
 
 def test_a_suite_of_nothing_but_declared_cases_reports_no_case_at_all() -> None:
     """The same four numbers a suite of no cases reports."""
-    only = CaseResult(case=case("declared"), declared=True, declared_reason="no-cowork")
+    only = CaseEntry.build(case("declared"), TREE.resolve(), declared_reason="no-cowork")
     document = suite([only])
     assert document["aggregates"] == {
         "casesTotal": 0,
@@ -301,15 +315,16 @@ def test_no_filter_omits_both_filter_fields() -> None:
 
 
 def test_the_document_is_written_under_the_one_name(tmp_path: Path) -> None:
-    path = write(tmp_path, suite([]))
+    path = write(tmp_path, ResultDocument.model_validate(suite([])))
     assert path == tmp_path / RESULT_NAME
     assert json.loads(path.read_text(encoding="utf-8"))["schemaVersion"] == 1
 
 
 def test_the_document_is_json_serializable_with_a_real_case() -> None:
-    entry = CaseResult(
-        case=read(CASE_DIR),
-        runs=(Run.collected(session("answered"), (result("a", True),), timeout_seconds=1800.0),),
+    entry = CaseEntry.build(
+        read(CASE_DIR),
+        TREE.resolve(),
+        (RunEntry.collected(session("answered"), (result("a", True),), timeout_seconds=1800.0),),
     )
     json.dumps(suite([entry]))
 
@@ -325,7 +340,7 @@ def test_a_plugin_with_no_readable_manifest_falls_back_to_the_folder_name(
         judge_model="haiku",
         claude_version=VERSION,
     )
-    assert document["suite"]["plugins"] == [
+    assert dump(document)["suite"]["plugins"] == [
         {"name": "nameless", "path": str((tmp_path / "nameless").resolve())}
     ]
 
@@ -349,6 +364,6 @@ def test_a_grader_definition_needs_no_case_on_disk() -> None:
         frontmatter_keys={},
         path=TREE / "evals" / "greeter" / "guard" / "prompt.md",
     )
-    definition = CaseResult(case=entry).document(TREE.resolve())["graders"][0]
+    definition = dump(CaseEntry.build(entry, TREE.resolve()))["graders"][0]
     assert definition["config"] == {"tool": "WebFetch", "min": 0, "max": 0}
     assert "graderMarkdown" not in definition

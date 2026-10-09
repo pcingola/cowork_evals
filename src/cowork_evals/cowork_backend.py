@@ -23,7 +23,7 @@ from .grader import grade as grade_structural
 from .grader import skipped as skipped_result
 from .judge import grade as grade_judged
 from .judge import resolve_model
-from .results import CaseResult, Run, build, write
+from .results import CaseEntry, RunEntry, build, write
 
 # The MCP stand-in directory. Its three layers, suite, group and case, are
 # docs/claude_code/plugin_eval_reference.md.
@@ -255,7 +255,7 @@ def run(
 
     model = resolve_model(judge_model, resolved)
     started = datetime.now(timezone.utc)
-    results = [_run_case(entry, resolved, model) for entry in prepared.entries]
+    results = [_run_case(entry, prepared.root, resolved, model) for entry in prepared.entries]
     document = build(
         root=prepared.root,
         cases=results,
@@ -271,20 +271,20 @@ def run(
 # One case, and one run of it.
 
 
-def _run_case(entry: Entry, config: Config, model: str) -> CaseResult:
+def _run_case(entry: Entry, root: Path, config: Config, model: str) -> CaseEntry:
     """Every run of one case. A declared case submits nothing and leaves `arms.with` empty."""
     if entry.declared is not None:
-        return CaseResult(case=entry.case, declared=True, declared_reason=entry.declared)
+        return CaseEntry.build(entry.case, root, declared_reason=entry.declared)
 
     # `Config` is frozen, so a differing timeout is a differing `CoWork`. The ceiling and
     # the run log are files, and still count across instances.
     driver = CoWork(config.cowork, run_timeout=entry.timeout_seconds)
-    return CaseResult(
-        case=entry.case, runs=tuple(_one_run(driver, entry, model) for _ in range(entry.runs))
+    return CaseEntry.build(
+        entry.case, root, tuple(_one_run(driver, entry, model) for _ in range(entry.runs))
     )
 
 
-def _one_run(driver: CoWork, entry: Entry, model: str) -> Run:
+def _one_run(driver: CoWork, entry: Entry, model: str) -> RunEntry:
     """One submission. A `CoWorkError` becomes this run's error, and the suite continues."""
     try:
         session = driver.run(entry.case.prompt)
@@ -293,7 +293,7 @@ def _one_run(driver: CoWork, entry: Entry, model: str) -> Run:
     return _graded(session, entry, model)
 
 
-def _after_failure(driver: CoWork, entry: Entry, model: str, error: CoWorkError) -> Run:
+def _after_failure(driver: CoWork, entry: Entry, model: str, error: CoWorkError) -> RunEntry:
     """What is still readable after the driver raised.
 
     A run timeout is collected: the error carries the session directory, the CoWork session
@@ -308,14 +308,18 @@ def _after_failure(driver: CoWork, entry: Entry, model: str, error: CoWorkError)
         try:
             session = driver.collect(error.session_dir, prompt=entry.case.prompt)
         except CoWorkError:
-            return Run(
+            return RunEntry.graded(
                 session_dir=session_dir, timeout_seconds=entry.timeout_seconds, error=message
             )
         return _graded(session, entry, model, error=message)
-    return Run(session_dir=session_dir, timeout_seconds=entry.timeout_seconds, error=message)
+    return RunEntry.graded(
+        session_dir=session_dir, timeout_seconds=entry.timeout_seconds, error=message
+    )
 
 
-def _graded(session: SessionDocument, entry: Entry, model: str, *, error: str | None = None) -> Run:
+def _graded(
+    session: SessionDocument, entry: Entry, model: str, *, error: str | None = None
+) -> RunEntry:
     """Every grader of one case against one session document, structural then judged."""
     results = []
     judge_cost = 0.0
@@ -329,7 +333,7 @@ def _graded(session: SessionDocument, entry: Entry, model: str, *, error: str | 
             judge_cost += judged.cost_usd
         else:
             results.append(grade_structural(grader, session))
-    return Run.collected(
+    return RunEntry.collected(
         session,
         tuple(results),
         timeout_seconds=entry.timeout_seconds,
