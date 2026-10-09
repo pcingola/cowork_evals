@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, ValidationError
+
 from .cases import BaselineGraderConfig, FileTarget, Grader, LlmGraderConfig
 from .config import Config
 from .grader import GraderResult, failed, produced_file, resolve_target, skipped
@@ -45,12 +47,11 @@ PASS_WORD = "PASS"
 FAIL_WORD = "FAIL"
 LOST_WORD = "LOST"
 
-# The shape a vote comes back in, enforced by the CLI rather than parsed here. `--json-schema`
-# makes `--output-format json` carry a `structured_output` object beside the `result` string.
-# Measured on CLI 2.1.273.
+# The shape a vote comes back in, enforced by the CLI. `--json-schema` makes
+# `--output-format json` carry a `structured_output` object beside the `result` string, and
+# `JudgeOutput` reads both. Measured on CLI 2.1.273.
 VERDICT_KEY = "verdict"
 REASONING_KEY = "reasoning"
-STRUCTURED_KEY = "structured_output"
 VERDICT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -91,6 +92,33 @@ CHECK_INSTRUCTION = (
 IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
 RIFF = b"RIFF"
 WEBP = b"WEBP"
+
+
+class JudgeVerdict(BaseModel):
+    """The `structured_output` object `--json-schema` makes a reply carry.
+
+    `verdict` is any string here: an absent verdict and one that is neither word are each a lost
+    vote, which `read_reply` decides, not the model.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    verdict: str | None = None
+    reasoning: str | None = None
+
+
+class JudgeOutput(BaseModel):
+    """One `claude -p --output-format json` document, as far as the judge reads it.
+
+    A reply also carries `type`, `subtype`, `is_error` and sometimes `duration_ms` and
+    `num_turns`, which nothing here reads.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    result: str | None = None
+    structured_output: JudgeVerdict | None = None
+    total_cost_usd: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,23 +335,20 @@ def read_reply(stdout: str) -> Reply:
     """One vote, its reasoning and its spend, from one `--output-format json` document.
 
     A document carrying `structured_output` is read from it, and any other from `result` as a bare
-    word. A reply that is neither word is a lost vote, and a lost vote is not a `PASS`.
+    word. A reply that is neither word is a lost vote, and a lost vote is not a `PASS`. A document
+    that does not parse, or does not validate as `JudgeOutput`, is a lost vote that cost nothing.
     """
     try:
-        payload = json.loads(stdout)
-    except ValueError:
+        payload = JudgeOutput.model_validate_json(stdout)
+    except ValidationError:
         return Reply(error="the judge printed no JSON document")
-    if not isinstance(payload, dict):
-        return Reply(error="the judge printed no JSON document")
-    cost = payload.get("total_cost_usd")
-    spent = float(cost) if isinstance(cost, int | float) else 0.0
+    spent = payload.total_cost_usd
 
-    structured = payload.get(STRUCTURED_KEY)
-    if isinstance(structured, dict):
-        verdict = structured.get(VERDICT_KEY)
-        reasoning = structured.get(REASONING_KEY)
-        said = reasoning.strip() if isinstance(reasoning, str) else ""
-        word = verdict.strip().upper() if isinstance(verdict, str) else ""
+    structured = payload.structured_output
+    if structured is not None:
+        verdict = structured.verdict
+        said = (structured.reasoning or "").strip()
+        word = (verdict or "").strip().upper()
         if word in (PASS_WORD, FAIL_WORD):
             return Reply(vote=word == PASS_WORD, cost_usd=spent, reasoning=said)
         return Reply(
@@ -332,8 +357,8 @@ def read_reply(stdout: str) -> Reply:
             error=f"the judge's {VERDICT_KEY} was neither word: {str(verdict)[:80]!r}",
         )
 
-    answer = payload.get("result")
-    if not isinstance(answer, str):
+    answer = payload.result
+    if answer is None:
         return Reply(cost_usd=spent, error="the judge document carries no result")
     word = answer.strip().upper()
     if word == PASS_WORD:
