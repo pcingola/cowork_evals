@@ -270,6 +270,33 @@ def test_the_line_one_check_writes(collected: Path) -> None:
     assert "judge" not in line
 
 
+# Advisory checks. docs/checks.md.
+
+
+def test_an_advisory_failure_keeps_its_verdict_and_moves_no_score(
+    tmp_path: Path, collected: Path
+) -> None:
+    case = tmp_path / "case"
+    (case / "checks").mkdir(parents=True)
+    (case / "checks" / "a.py").write_text(
+        "from cowork_evals.checks import Result, Run, check\n\n"
+        "@check\ndef plain(run: Run) -> None:\n    return None\n\n"
+        "@check(advisory=True)\ndef advised(run: Run) -> Result:\n"
+        "    return Result(passed=False, explanation='the judge said FAIL')\n"
+    )
+    found = checks.discover(case)
+    assert {one.name: one.advisory for one in found} == {"a.plain": False, "a.advised": True}
+
+    results = [
+        checks.grader_result(checks.execute(one, checks.build_run(collected, case, 1, "haiku")))
+        for one in found
+    ]
+    assert [entry["passed"] for entry in results] == [True, False]
+    assert [entry["scored"] for entry in results] == [True, False]
+    assert results[1]["explanation"] == "the judge said FAIL"
+    assert checks.score({"graders": results}) == 1.0
+
+
 # The layer: what it appends to the document, and what it writes beside the trace.
 
 

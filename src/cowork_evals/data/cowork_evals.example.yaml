@@ -34,6 +34,7 @@ cowork:
 eval:
   # model: sonnet
   # judge_model: haiku
+  # judge_votes: 3
   # allow_tools: [Bash, Read, Glob, Grep, Write, Edit, WebFetch, Skill]
   # `with-without` runs every case a second time with no plugin loaded, and the verdict
   # then decides on each case's delta rather than on its score. It costs twice as much
@@ -48,6 +49,7 @@ eval:
 docker:
   # platform: linux/arm64
   # claude_code_version: 2.1.265
+  # credential: login
   # login_dir: ~/.cache/cowork_evals/claude
   # An extra root CA, for a host whose network inspects TLS. Unset, or naming a file that
   # is not there, passes nothing. The certificate never enters this repository.

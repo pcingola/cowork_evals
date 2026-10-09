@@ -1,4 +1,10 @@
+<div align="center">
+
+<img src="assets/images/logo.webp" alt="CoWork Evals: an agent at a desk in a glass booth, watched by a scientist with a PASS and FAIL stamp" width="360">
+
 # CoWork Evals
+
+</div>
 
 Run evals for Claude CoWork skills and plugins, and run a plugin's own Python tests on the
 CoWork runtime.
@@ -21,6 +27,10 @@ graders are deterministic and carry the verdict. The two judged ones are printed
 kind of assertion is a check: an author's own Python in the case's `checks/` directory, run on
 the host over what the run produced, which is how a case says what is inside the file rather
 than only that it appeared. See [`docs/checks.md`](docs/checks.md).
+
+<p align="center">
+  <img src="assets/images/case_flow.webp" alt="How a case runs: prompt.md, the docker or cowork backend, the trace and the files the agent created, the graders, the checks, and exit 0 or exit 1" width="520">
+</p>
 
 The CoWork backend honours a subset of the format, because it drives a live session rather
 than the harness. [`docs/approaches.md`](docs/approaches.md) says which subset, what each
@@ -83,6 +93,10 @@ machine is not yours while a suite runs, and there is no headless route and no C
 typed unless CoWork is frontmost at that moment. A container run costs none of that, and runs
 the code in your checkout rather than the code deployed to the account. The whole comparison
 is [`docs/approaches.md`](docs/approaches.md).
+
+<p align="center">
+  <img src="assets/images/backends.webp" alt="A robot arm presses Return on the CoWork laptop, an agent runs in a Docker container, and a judge stamps verdict.txt" width="760">
+</p>
 
 ## Quickstart
 
@@ -231,12 +245,20 @@ Then widen it:
 | Ask whether the plugin did anything    | `--ablation with-without`, which runs a no-plugin baseline arm and decides each case on the delta |
 | Run the same cases on the real product | `--cowork`, after `cowork.profile` is set in `cowork_evals.yaml`    |
 
+<p align="center">
+  <img src="assets/images/ablation.webp" alt="The same agent on two benches, with the plugin and without it, and a scientist measuring the delta" width="520">
+</p>
+
 ### 3. Tests
 
 `cowork_evals test` is the other half, and it is not an eval. It runs the plugin's own pytest
 suite inside the CoWork image: Python 3.10, the image wheel set, no model, no case tree, no
 grader and no verdict. That is what says a plugin's Python behaves in a session, which a suite
 passing against a laptop's own wheels does not.
+
+<p align="center">
+  <img src="assets/images/runtime.webp" alt="A developer holds a passing test report beside a laptop full of packages, while the plugin fails with ImportError inside the Python 3.10 CoWork session" width="520">
+</p>
 
 ```bash
 cowork_evals test --docker plugins/notes/tests

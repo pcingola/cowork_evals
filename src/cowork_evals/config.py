@@ -94,6 +94,11 @@ CONSENT_DIALOG = "dialog"
 CONSENT_NONE = "none"
 CONSENT_CHOICES = (CONSENT_DIALOG, CONSENT_NONE)
 
+# How the run container authenticates Claude Code. docs/docker.md.
+CREDENTIAL_LOGIN = "login"
+CREDENTIAL_BEDROCK = "bedrock"
+CREDENTIAL_CHOICES = (CREDENTIAL_LOGIN, CREDENTIAL_BEDROCK)
+
 
 class CoWorkError(Exception):
     """A driver failure, carrying its taxonomy code from docs/cowork_driver.md."""
@@ -143,6 +148,14 @@ def _count(name: str, value: Any) -> int:
     return value
 
 
+def _votes(name: str, value: Any) -> int:
+    """A vote count. Zero turns every judged assertion into a lost vote, so it is refused."""
+    count = _count(name, value)
+    if count < 1:
+        raise CoWorkError(2, f"{name}: expected an integer at or above one, got {count}")
+    return count
+
+
 def _path(name: str, value: Any) -> Path:
     if isinstance(value, Path):
         return _absolute(value)
@@ -165,6 +178,14 @@ def _fraction(name: str, value: Any) -> int | float:
 def _ablation(name: str, value: Any) -> str:
     if _text(name, value) not in ABLATION_CHOICES:
         raise CoWorkError(2, f"{name}: expected one of {', '.join(ABLATION_CHOICES)}, got {value}")
+    return value
+
+
+def _credential(name: str, value: Any) -> str:
+    if _text(name, value) not in CREDENTIAL_CHOICES:
+        raise CoWorkError(
+            2, f"{name}: expected one of {', '.join(CREDENTIAL_CHOICES)}, got {value}"
+        )
     return value
 
 
@@ -292,6 +313,8 @@ class EvalSection:
 
     model: str = "sonnet"
     judge_model: str = "haiku"
+    # How many times a judged assertion is asked, the answer being the majority.
+    judge_votes: int = 3
     # What a CoWork session can do, named in the container's own tool names. A session
     # grants nothing and acts, so a container run that is denied a tool a session has is
     # measuring this package's configuration and not the plugin. docs/running_evals.md.
@@ -325,6 +348,7 @@ class EvalSection:
     _FIELDS: ClassVar[dict[str, Callable[[str, Any], Any]]] = {
         "model": _text,
         "judge_model": _text,
+        "judge_votes": _votes,
         "allow_tools": _tools,
         "ablation": _ablation,
         "delta_threshold": _fraction,
@@ -345,6 +369,7 @@ class DockerSection:
 
     platform: str = "linux/arm64"
     claude_code_version: str = "2.1.265"
+    credential: str = CREDENTIAL_LOGIN
     login_dir: Path = Path("~/.cache/cowork_evals/claude")
     extra_ca_file: Path | None = None
     # The one route from the process environment into a run. Empty by default, so a
@@ -359,6 +384,7 @@ class DockerSection:
     _FIELDS: ClassVar[dict[str, Callable[[str, Any], Any]]] = {
         "platform": _text,
         "claude_code_version": _text,
+        "credential": _credential,
         "login_dir": _path,
         "extra_ca_file": _optional_path,
         "env_passthrough": _env_names,

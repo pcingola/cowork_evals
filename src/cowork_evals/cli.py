@@ -1087,6 +1087,14 @@ def _login(args: argparse.Namespace, config: Config) -> int:
     run -it`, whose message says nothing about what the operator has to do.
     """
     image = Docker(config)
+    if not image.uses_login:
+        return _refuse(
+            [
+                f"docker.credential is {image.credential}, so there is no login to make: "
+                "cowork_evals check --docker reports a host variable that is unset"
+            ],
+            PREFLIGHT_FAILED,
+        )
     if args.check:
         if image.has_credential():
             print(f"{image.credentials_file}: current")

@@ -21,17 +21,19 @@ case "${1-}" in
   "") NO_CACHE="False" ;;
   --recreate) NO_CACHE="True" ;;
   --check)
-    # The credential is not a property of the image, so --check does not read it.
+    # The credential is not a property of the image, so --check reads neither route's.
     exec uv run --project "$ROOT" python3 -c '
 import sys
 
 from cowork_evals.docker import Condition, Docker
 
+CREDENTIAL = (Condition.CREDENTIAL, Condition.BEDROCK)
+
 docker = Docker()
 unmet = [
     message
     for condition, message in docker.check()
-    if condition is not Condition.CREDENTIAL
+    if condition not in CREDENTIAL
 ]
 for message in unmet:
     print(f"FAIL: {message}", file=sys.stderr)

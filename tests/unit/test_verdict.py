@@ -11,6 +11,7 @@ import json
 import shutil
 from pathlib import Path
 
+from cowork_evals.checks import ADVISORY_TYPE
 from cowork_evals.harness import RESULT_NAME
 from cowork_evals.verdict import Verdict, decide
 
@@ -540,6 +541,24 @@ def test_a_failed_check_fails_the_run_like_a_structural_grader(tmp_path: Path) -
         "the check grader failed: AssertionError: written.txt says NOTHING"
     ]
     assert notes(result) == []
+
+
+def test_a_failed_advisory_check_is_a_note_and_fails_nothing(tmp_path: Path) -> None:
+    """The same failing check, marked advisory by its definition. docs/checks.md."""
+    directory = run_directory(tmp_path, smoke="check_failure")
+    document = json.loads((directory / "smoke" / RESULT_NAME).read_text())
+    for definition in document["cases"][0]["graders"]:
+        if definition["type"] == "check":
+            definition["type"] = ADVISORY_TYPE
+    (directory / "smoke" / RESULT_NAME).write_text(json.dumps(document))
+
+    result = judge(directory)
+    assert result.passed is True
+    assert failures(result) == []
+    assert notes(result) == [
+        "NOTE smoke/checked-file: run 1: assertions.the_file_says_written: "
+        "the advisory check failed: AssertionError: written.txt says NOTHING"
+    ]
 
 
 def test_a_failed_check_names_the_directory_holding_its_scratch(tmp_path: Path) -> None:
