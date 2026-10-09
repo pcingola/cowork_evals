@@ -43,12 +43,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
+
 from . import judge as judging
 from . import results
 from .cases import CHECKS_DIR, Grader, check_files
 from .grader import GraderResult
 from .harness import RESULT_NAME
-from .results import ARM_WITH, ARM_WITHOUT, ARMS, DECLARED_UNRUNNABLE
+from .results import CaseEntry, GraderDefinition, ResultDocument, RunEntry
 from .traces import LAST_MESSAGE_NAME, TRACE_NAME, WORKSPACE_NAME
 
 # The attribute `@check` writes, and the grader type a check result carries in the document.
@@ -80,10 +88,6 @@ NO_ARTEFACTS = (
 # shown the whole run directory is judging the transcript as well as the artefact.
 NO_PATHS = "run.judge was called with no path, and it has no default of everything"
 
-# The two fields a check judge's spend is added to: one on a run, one on the document.
-RUN_SPEND = "judgeCostUsd"
-SUITE_SPEND = "costUsd"
-
 # The name `judge.tally` sees. It never leaves `run.judge`, which reads the verdict and the
 # spend off the result and carries the check's own name into the outcome.
 JUDGE_GRADER = "run.judge"
@@ -108,20 +112,18 @@ class Result:
     explanation: str = ""
 
 
-@dataclass(frozen=True, slots=True)
-class JudgeCall:
+class JudgeCall(BaseModel):
     """One `run.judge` call, kept whole for `checks.jsonl`.
 
     The result document's `evidence` is capped at 2000 characters, and a person reading a
     failed judged check needs the whole exchange. docs/checks.md.
     """
 
-    prompt: str
-    replies: tuple[str, ...]
-    cost_usd: float
+    model_config = ConfigDict(populate_by_name=True, extra="forbid", frozen=True)
 
-    def document(self) -> dict[str, Any]:
-        return {"prompt": self.prompt, "replies": list(self.replies), "costUsd": self.cost_usd}
+    prompt: str
+    replies: list[str]
+    cost_usd: float = Field(alias="costUsd")
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,10 +213,10 @@ class Run:
         self.calls.append(
             JudgeCall(
                 prompt=text,
-                replies=tuple(
+                replies=[
                     f"{reply.word}: {reply.reasoning}" if reply.reasoning else reply.word
                     for reply in replies
-                ),
+                ],
                 cost_usd=judged.cost_usd,
             )
         )
@@ -237,39 +239,48 @@ class Check:
     advisory: bool = False
 
 
-@dataclass(frozen=True, slots=True)
-class Outcome:
-    """One check, run. It is what a grader result and a `checks.jsonl` line are built from."""
+class Outcome(BaseModel):
+    """One check, run. It is what a grader result and a `checks.jsonl` line are built from.
+
+    The line carries `skipped` only when true, `judge` only when a judge was asked, `costUsd`
+    only when it is not 0, and an optional field only when it is set. `advisory` is never
+    written: it is on the case's definition, so a line read back is not advisory.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid", frozen=True)
 
     name: str
     passed: bool
     explanation: str
-    duration_seconds: float = 0.0
+    duration_seconds: float = Field(default=0.0, alias="durationSeconds")
     skipped: bool = False
-    skip_reason: str | None = None
+    skip_reason: str | None = Field(default=None, alias="skipReason")
     traceback: str | None = None
-    calls: tuple[JudgeCall, ...] = ()
-    cost_usd: float = 0.0
-    advisory: bool = False
+    calls: list[JudgeCall] = Field(default_factory=list, alias="judge")
+    cost_usd: float = Field(default=0.0, alias="costUsd")
+    advisory: bool = Field(default=False, exclude=True)
 
-    def document(self) -> dict[str, Any]:
-        """One `checks.jsonl` line."""
-        entry: dict[str, Any] = {
-            "name": self.name,
-            "passed": self.passed,
-            "explanation": self.explanation,
-            "durationSeconds": self.duration_seconds,
+    @model_serializer(mode="wrap")
+    def _line(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        entry = handler(self)
+        absent = {
+            "skipped": not self.skipped,
+            "skipReason": self.skip_reason is None,
+            "traceback": self.traceback is None,
+            "judge": not self.calls,
+            "costUsd": not self.cost_usd,
         }
-        if self.skipped:
-            entry["skipped"] = True
-            entry["skipReason"] = self.skip_reason
-        if self.traceback is not None:
-            entry["traceback"] = self.traceback
-        if self.calls:
-            entry["judge"] = [call.document() for call in self.calls]
-        if self.cost_usd:
-            entry["costUsd"] = self.cost_usd
-        return entry
+        return {key: value for key, value in entry.items() if not absent.get(key, False)}
+
+    def document(self) -> str:
+        """One `checks.jsonl` line, without its newline."""
+        return json.dumps(self.model_dump(mode="json", by_alias=True))
+
+    @classmethod
+    def from_line(cls, line: str) -> Outcome:
+        """One `checks.jsonl` line read back. It raises `ValueError` for a line that is not
+        one."""
+        return cls.model_validate_json(line)
 
 
 def _judge_grader(prompt: str) -> Grader:
@@ -428,7 +439,7 @@ def execute(one: Check, run: Run) -> Outcome:
             passed=False,
             explanation=str(error),
             duration_seconds=time.monotonic() - started,
-            calls=tuple(run.calls),
+            calls=list(run.calls),
             cost_usd=sum(call.cost_usd for call in run.calls),
             advisory=one.advisory,
         )
@@ -439,7 +450,7 @@ def execute(one: Check, run: Run) -> Outcome:
             explanation=f"{type(error).__name__}: {error}",
             duration_seconds=time.monotonic() - started,
             traceback=traceback.format_exc(),
-            calls=tuple(run.calls),
+            calls=list(run.calls),
             cost_usd=sum(call.cost_usd for call in run.calls),
             advisory=one.advisory,
         )
@@ -449,7 +460,7 @@ def execute(one: Check, run: Run) -> Outcome:
         passed=passed,
         explanation=explanation,
         duration_seconds=time.monotonic() - started,
-        calls=tuple(run.calls),
+        calls=list(run.calls),
         cost_usd=sum(call.cost_usd for call in run.calls),
         advisory=one.advisory,
     )
@@ -481,17 +492,16 @@ def skipped(one: Check, reason: str) -> Outcome:
 # The run directory, and the document.
 
 
-def collected(run: dict[str, Any]) -> Path | None:
+def collected(run: RunEntry) -> Path | None:
     """The collected run directory of one run entry, or `None` when there is none.
 
     It is the parent of `tracePath`, which `traces.collect` rewrote to the collected copy on
     both backends, so it is the same directory `verdict.artifacts` names on a failure line
     and `scratch/` and `checks.jsonl` sit beside the three collected names.
     """
-    named = run.get("tracePath")
-    if not isinstance(named, str) or not named:
+    if not run.trace_path:
         return None
-    directory = Path(named).parent
+    directory = Path(run.trace_path).parent
     if not directory.is_dir() or not (directory / TRACE_NAME).is_file():
         return None
     return directory
@@ -514,13 +524,13 @@ def build_run(directory: Path, case_dir: Path, index: int, judge_model: str) -> 
     )
 
 
-def definition(name: str, advisory: bool = False) -> dict[str, Any]:
+def definition(name: str, advisory: bool = False) -> GraderDefinition:
     """One check's entry in the case's `graders[]`, so the verdict can join a result to it."""
     kind = ADVISORY_TYPE if advisory else CHECK_TYPE
-    return {"name": name, "type": kind, "weight": WEIGHT, "config": {}}
+    return GraderDefinition(name=name, type=kind, weight=WEIGHT, config=None)
 
 
-def grader_result(outcome: Outcome) -> dict[str, Any]:
+def grader_result(outcome: Outcome) -> GraderResult:
     """One check's entry in the run's `graders[]`, in the shape every grader result has."""
     return GraderResult(
         name=outcome.name,
@@ -530,41 +540,35 @@ def grader_result(outcome: Outcome) -> dict[str, Any]:
         scored=not outcome.skipped and not outcome.advisory,
         skipped=outcome.skipped,
         skip_reason=outcome.skip_reason if outcome.skipped else None,
-    ).model_dump(mode="json", by_alias=True)
+    )
 
 
-def add_spend(entry: dict[str, Any], spent: float, key: str = RUN_SPEND) -> None:
-    """Add a check judge's spend to one field of one entry, and nothing when it is 0.
+def add_spend(entry: RunEntry | ResultDocument, spent: float) -> None:
+    """Add a check judge's spend to a run's `judgeCostUsd` or the document's `costUsd`, and
+    nothing when it is 0.
 
-    The two fields it is added to are a run's `judgeCostUsd` and the document's `costUsd`,
-    which are what the panel and `eval.max_cost_total_usd` read. A healthy document with no
-    judged check is unchanged. docs/checks_layer.md.
+    Those two fields are what the panel and `eval.max_cost_total_usd` read. A healthy
+    document with no judged check is unchanged. docs/checks_layer.md.
     """
     if not spent:
         return
-    entry[key] = _number(entry.get(key)) + spent
+    if isinstance(entry, RunEntry):
+        entry.judge_cost_usd += spent
+    else:
+        entry.cost_usd += spent
 
 
-def score(run: dict[str, Any]) -> float:
+def score(run: RunEntry) -> float:
     """The weighted fraction of scored grader results that passed. Zero when there are none.
 
     It is the rule `RunEntry.graded` scores by, over the document's `scored` flags, because
     what is scored here is a document the harness may have written.
     """
-    scored = [
-        result
-        for result in run.get("graders") or []
-        if isinstance(result, dict) and result.get("scored", True)
-    ]
-    total = sum(_weight(result) for result in scored)
+    scored = [result for result in run.graders if result.scored]
+    total = sum(result.weight for result in scored)
     if not total:
         return 0.0
-    return sum(_weight(result) for result in scored if result.get("passed")) / total
-
-
-def _weight(result: dict[str, Any]) -> float:
-    held = result.get("weight", WEIGHT)
-    return float(held) if isinstance(held, int | float) and not isinstance(held, bool) else WEIGHT
+    return sum(result.weight for result in scored if result.passed) / total
 
 
 # The layer.
@@ -586,25 +590,21 @@ def run(output_dir: Path | str, root: Path | str, *, judge_model: str) -> list[s
     directory = Path(output_dir)
     path = directory / RESULT_NAME
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        document = ResultDocument.read(path)
     except (OSError, ValueError):
         # The verdict already fails the invocation for a document it cannot read, and a
         # second line saying it again is noise.
-        return []
-    if not isinstance(document, dict):
         return []
 
     plugin = Path(root)
     warnings: list[str] = []
     spent = 0.0
     checked = False
-    for case in document.get("cases") or []:
-        if not isinstance(case, dict):
-            continue
-        if case.get(DECLARED_UNRUNNABLE):
+    for case in document.cases:
+        if case.declared_unrunnable:
             # No run, so nothing to check. The case is counted, exactly as it is today.
             continue
-        checks = discover(plugin / str(case.get("dir") or ""))
+        checks = discover(plugin / case.dir)
         if not checks:
             continue
         checked = True
@@ -612,16 +612,16 @@ def run(output_dir: Path | str, root: Path | str, *, judge_model: str) -> list[s
     if not checked:
         # A suite with no check anywhere leaves the document exactly as the backend wrote it.
         return warnings
-    add_spend(document, spent, SUITE_SPEND)
+    add_spend(document, spent)
     _recount(document)
     try:
-        results.write(directory, results.ResultDocument.model_validate(document))
-    except (OSError, ValueError) as error:
+        results.write(directory, document)
+    except OSError as error:
         return [*warnings, f"{path}: the check results could not be written: {error}"]
     return warnings
 
 
-def _recount(document: dict[str, Any]) -> None:
+def _recount(document: ResultDocument) -> None:
     """The suite's means, over the case aggregates the checks just moved.
 
     `overallScore` is the mean case score and `overallPassRate` the mean case pass rate,
@@ -630,82 +630,67 @@ def _recount(document: dict[str, Any]) -> None:
     is pinned to 0, so every case counts as passed there whatever a check said, and this
     package decides pass and fail. docs/checks_layer.md.
     """
-    counted = [
-        case
-        for case in document.get("cases") or []
-        if isinstance(case, dict) and not case.get(DECLARED_UNRUNNABLE)
-    ]
+    counted = [case for case in document.cases if not case.declared_unrunnable]
     if not counted:
         return
-    aggregates = document.get("aggregates")
-    if not isinstance(aggregates, dict):
-        return
-    scores = [_number((case.get("aggregates") or {}).get("score")) for case in counted]
-    rates = [_number((case.get("aggregates") or {}).get("passRate")) for case in counted]
-    aggregates["overallScore"] = sum(scores) / len(counted)
-    aggregates["overallPassRate"] = sum(rates) / len(counted)
+    aggregates = document.aggregates
+    aggregates.overall_score = sum(case.aggregates.score for case in counted) / len(counted)
+    aggregates.overall_pass_rate = sum(case.aggregates.pass_rate for case in counted) / len(counted)
 
-    if "meanDelta" not in aggregates:
+    if aggregates.mean_delta is None:
         # The harness writes it only for a two-arm document whose arms are comparable.
         return
-    deltas = [(case.get("aggregates") or {}).get("delta") for case in counted]
-    defined = [one for one in deltas if isinstance(one, int | float) and not isinstance(one, bool)]
+    defined = [case.aggregates.delta for case in counted if case.aggregates.delta is not None]
     if defined:
-        aggregates["meanDelta"] = sum(defined) / len(defined)
+        aggregates.mean_delta = sum(defined) / len(defined)
 
 
 def _each_case(
-    case: dict[str, Any],
+    case: CaseEntry,
     checks: tuple[Check, ...],
     plugin: Path,
     judge_model: str,
     warnings: list[str],
 ) -> float:
     """One case: every run of every arm it carries, then the case's numbers for each arm."""
-    case_dir = plugin / str(case.get("dir") or "")
-    definitions = case.setdefault("graders", [])
-    if isinstance(definitions, list):
-        definitions += [definition(one.name, one.advisory) for one in checks]
+    case_dir = plugin / case.dir
+    case.graders += [definition(one.name, one.advisory) for one in checks]
 
     spent = 0.0
-    arms = case.get("arms") or {}
-    walked: dict[str, list[dict[str, Any]]] = {}
-    for name in ARMS:
-        runs = [entry for entry in arms.get(name) or [] if isinstance(entry, dict)]
+    with_runs = case.arms.with_
+    without_runs = case.arms.without or []
+    for runs in (with_runs, without_runs):
         for index, entry in enumerate(runs, start=1):
             spent += _each_run(entry, checks, case_dir, index, judge_model, warnings)
-        if runs:
-            walked[name] = runs
 
-    aggregates = dict(case.get("aggregates") or {})
-    with_runs = walked.get(ARM_WITH)
-    without_runs = walked.get(ARM_WITHOUT)
+    aggregates = case.aggregates
     if with_runs:
-        aggregates["score"] = sum(score(entry) for entry in with_runs) / len(with_runs)
-        aggregates["passRate"] = sum(1 for entry in with_runs if entry.get("passed")) / len(
-            with_runs
-        )
+        aggregates.score = sum(score(entry) for entry in with_runs) / len(with_runs)
+        aggregates.pass_rate = sum(1 for entry in with_runs if entry.passed) / len(with_runs)
     if without_runs:
         # Only where the harness already wrote one. It omits `scoreWithout` and `delta`
         # together when the two arms were graded under different rules, and this layer
         # introduces neither. docs/running_evals.md.
-        if "scoreWithout" in aggregates:
-            aggregates["scoreWithout"] = sum(score(entry) for entry in without_runs) / len(
+        if aggregates.score_without is not None:
+            aggregates.score_without = sum(score(entry) for entry in without_runs) / len(
                 without_runs
             )
-        if "passRateWithout" in aggregates:
-            aggregates["passRateWithout"] = sum(
-                1 for entry in without_runs if entry.get("passed")
-            ) / len(without_runs)
-    if with_runs and without_runs and "delta" in aggregates and "scoreWithout" in aggregates:
-        aggregates["delta"] = aggregates["score"] - aggregates["scoreWithout"]
-    if aggregates:
-        case["aggregates"] = aggregates
+        if aggregates.pass_rate_without is not None:
+            aggregates.pass_rate_without = sum(1 for entry in without_runs if entry.passed) / len(
+                without_runs
+            )
+    if (
+        with_runs
+        and without_runs
+        and aggregates.delta is not None
+        and aggregates.score_without is not None
+    ):
+        aggregates.delta = aggregates.score - aggregates.score_without
     return spent
 
 
 def _each_run(
-    entry: dict[str, Any],
+    entry: RunEntry,
     checks: tuple[Check, ...],
     case_dir: Path,
     index: int,
@@ -722,11 +707,9 @@ def _each_run(
             outcomes.append(execute(one, build_run(directory, case_dir, index, judge_model)))
         warnings += _write(directory, outcomes)
 
-    graded = entry.setdefault("graders", [])
-    if isinstance(graded, list):
-        graded += [grader_result(outcome) for outcome in outcomes]
-    entry["score"] = score(entry)
-    entry["passed"] = entry["score"] == 1.0
+    entry.graders += [grader_result(outcome) for outcome in outcomes]
+    entry.score = score(entry)
+    entry.passed = entry.score == 1.0
 
     spent = sum(outcome.cost_usd for outcome in outcomes)
     add_spend(entry, spent)
@@ -735,15 +718,9 @@ def _each_run(
 
 def _write(directory: Path, outcomes: list[Outcome]) -> list[str]:
     """`checks.jsonl` beside the three collected names, one line per check."""
-    lines = "".join(json.dumps(outcome.document()) + "\n" for outcome in outcomes)
+    lines = "".join(outcome.document() + "\n" for outcome in outcomes)
     try:
         (directory / CHECKS_FILE).write_text(lines, encoding="utf-8")
     except OSError as error:
         return [f"{directory / CHECKS_FILE} could not be written: {error}"]
     return []
-
-
-def _number(value: Any) -> float:
-    if isinstance(value, int | float) and not isinstance(value, bool):
-        return float(value)
-    return 0.0

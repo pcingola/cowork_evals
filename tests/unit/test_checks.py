@@ -21,6 +21,7 @@ from cowork_evals import checks
 from cowork_evals.cases import read
 from cowork_evals.checks import Check, CheckError, Result, Run
 from cowork_evals.harness import RESULT_NAME
+from cowork_evals.results import ResultDocument, RunEntry
 
 DATA = Path(__file__).resolve().parent.parent / "data" / "checks"
 PLUGIN = DATA / "plugin"
@@ -251,7 +252,7 @@ def test_a_skip_is_a_failed_unscored_check() -> None:
     assert outcome.passed is False
     assert outcome.skipped is True
     assert outcome.skip_reason == checks.NO_ARTEFACTS
-    assert checks.grader_result(outcome)["scored"] is False
+    assert checks.grader_result(outcome).scored is False
 
 
 def test_a_result_carries_two_fields_and_nothing_else() -> None:
@@ -261,7 +262,7 @@ def test_a_result_carries_two_fields_and_nothing_else() -> None:
 
 def test_the_line_one_check_writes(collected: Path) -> None:
     found = outcomes("failing", collected)
-    line = json.loads(json.dumps(found["returns_false"].document()))
+    line = json.loads(found["returns_false"].document())
     assert line["name"] == "failures.returns_false"
     assert line["passed"] is False
     assert line["explanation"] == "the check returned False"
@@ -291,10 +292,10 @@ def test_an_advisory_failure_keeps_its_verdict_and_moves_no_score(
         checks.grader_result(checks.execute(one, checks.build_run(collected, case, 1, "haiku")))
         for one in found
     ]
-    assert [entry["passed"] for entry in results] == [True, False]
-    assert [entry["scored"] for entry in results] == [True, False]
-    assert results[1]["explanation"] == "the judge said FAIL"
-    assert checks.score({"graders": results}) == 1.0
+    assert [entry.passed for entry in results] == [True, False]
+    assert [entry.scored for entry in results] == [True, False]
+    assert results[1].explanation == "the judge said FAIL"
+    assert checks.score(run_entry(graders=results)) == 1.0
 
 
 # The layer: what it appends to the document, and what it writes beside the trace.
@@ -597,34 +598,51 @@ def test_the_spend_of_a_case_with_no_judge_call_is_nothing(tmp_path: Path) -> No
     assert one(document)["judgeCostUsd"] == 0.002
 
 
-def test_a_judge_spend_is_added_to_the_run_and_to_the_document() -> None:
-    entry = {"costUsd": 0.061, "judgeCostUsd": 0.002}
-    checks.add_spend(entry, 0.01)
-    assert entry == {"costUsd": 0.061, "judgeCostUsd": 0.012}
+def run_entry(**fields: Any) -> RunEntry:
+    """One run entry, with nothing graded unless `fields` says so."""
+    base: dict[str, Any] = {
+        "score": 0.0,
+        "passed": False,
+        "turns": 1,
+        "cost_usd": 0.061,
+        "judge_cost_usd": 0.002,
+        "error": None,
+        "skipped_paid_graders": False,
+        "graders": [],
+    }
+    return RunEntry(**{**base, **fields})
 
-    document = {"costUsd": 0.061}
-    checks.add_spend(document, 0.01, checks.SUITE_SPEND)
-    assert document == {"costUsd": 0.071}
+
+def test_a_judge_spend_is_added_to_the_run_and_to_the_document(tmp_path: Path) -> None:
+    entry = run_entry()
+    checks.add_spend(entry, 0.01)
+    assert entry.cost_usd == 0.061
+    assert entry.judge_cost_usd == pytest.approx(0.012)
+
+    document = ResultDocument.read(suite(tmp_path, []) / RESULT_NAME)
+    document.cost_usd = 0.061
+    checks.add_spend(document, 0.01)
+    assert document.cost_usd == pytest.approx(0.071)
 
 
 def test_a_check_that_asked_no_judge_adds_nothing() -> None:
-    entry = {"judgeCostUsd": 0.002}
+    entry = run_entry()
     checks.add_spend(entry, 0.0)
-    assert entry == {"judgeCostUsd": 0.002}
+    assert entry.judge_cost_usd == 0.002
 
 
 def test_a_judged_check_keeps_the_whole_exchange_in_its_line() -> None:
     call = checks.JudgeCall(
-        prompt="the whole prompt", replies=("PASS", "FAIL", "PASS"), cost_usd=0.01
+        prompt="the whole prompt", replies=["PASS", "FAIL", "PASS"], cost_usd=0.01
     )
     outcome = checks.Outcome(
         name="assertions.deck_is_readable",
         passed=True,
         explanation="judge votes: PASS FAIL PASS",
-        calls=(call,),
+        calls=[call],
         cost_usd=0.01,
     )
-    line = outcome.document()
+    line = json.loads(outcome.document())
     assert line["judge"] == [
         {"prompt": "the whole prompt", "replies": ["PASS", "FAIL", "PASS"], "costUsd": 0.01}
     ]

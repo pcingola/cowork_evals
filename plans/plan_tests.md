@@ -116,7 +116,7 @@ writes exactly the keys and values the module writes today, except where `plan_m
 - [x] `results.py`: `ResultDocument`, `SuiteInfo`, `PluginRef`, `SuiteAggregates`, `CaseEntry`, `Arms`, `CaseAggregates`, `GraderDefinition`, `RunEntry`, `CoWorkRef`. `results.Run` and `results.CaseResult` are removed.
 - [x] `cowork_backend.py` reads and writes `ResultDocument` and `SessionDocument`.
 - [x] `traces.py`: `TraceRecord`, and the result document read and rewritten as `ResultDocument`.
-- [ ] `checks.py`: `Outcome` and `JudgeCall` as `plan_models.md` gives them, and the result document read and rewritten as `ResultDocument`.
+- [x] `checks.py`: `Outcome` and `JudgeCall` as `plan_models.md` gives them, and the result document read and rewritten as `ResultDocument`.
 - [ ] `verdict.py` reads `ResultDocument`.
 - [ ] `panel.py`: `HistoryRecord`, `PanelSnapshot`, `Row`, `Cell`, and the result document read as `ResultDocument`.
 - [ ] `logs.py`: `RunEnvironment`.
