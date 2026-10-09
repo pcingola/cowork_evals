@@ -22,7 +22,7 @@ import pytest
 from cowork_evals import logs, traces, verdict
 from cowork_evals.cli import main
 from cowork_evals.docker import CONTAINER_KEEP_FILE, KEEP_FILE, Condition, Docker, probe, remedy
-from cowork_evals.docker.parity import EXPECTED_VERSIONS, REQUIREMENTS, compare
+from cowork_evals.docker.parity import EXPECTED_VERSIONS, REQUIREMENTS, ProbeDocument, compare
 from cowork_evals.harness import RunOptions
 from cowork_evals.requirements import pins
 from cowork_evals.results import ResultDocument
@@ -98,7 +98,7 @@ def test_python3_reports_the_recorded_version(docker):
 
 def test_the_probe_matches_the_inventory(docker):
     """The delta table in docs/docker.md, applied to a real probe of the built image."""
-    document = json.loads(
+    document = ProbeDocument.model_validate_json(
         container(
             docker,
             "python3",
@@ -106,7 +106,7 @@ def test_the_probe_matches_the_inventory(docker):
             mounts=("-v", f"{probe.__file__}:/tmp/probe.py:ro"),
         )
     )
-    assert document["architecture"], "the probe reports the platform it actually ran on"
+    assert document.architecture, "the probe reports the platform it actually ran on"
     failures, _ = compare(document, pins(REQUIREMENTS.read_text()))
     assert failures == [], "\n".join(failures)
 

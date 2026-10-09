@@ -7,7 +7,6 @@ introduced. No container starts here, and the comparison is the real one.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from cowork_evals.docker import probe
@@ -16,6 +15,7 @@ from cowork_evals.docker.parity import (
     EXPECTED_VERSIONS,
     PRESENT,
     REQUIREMENTS,
+    ProbeDocument,
     compare,
     main,
 )
@@ -25,7 +25,7 @@ DATA = Path(__file__).resolve().parents[1] / "data" / "docker"
 
 
 def probed(name: str) -> tuple[list[str], list[str]]:
-    document = json.loads((DATA / f"{name}.json").read_text())
+    document = ProbeDocument.model_validate_json((DATA / f"{name}.json").read_text())
     return compare(document, pins(REQUIREMENTS.read_text()))
 
 

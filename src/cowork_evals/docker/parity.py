@@ -17,9 +17,10 @@ docs/runtime.md.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..requirements import pins
 from . import probe
@@ -99,12 +100,72 @@ EXPECTED_OS_VERSION_ID = "22.04"
 EXPECTED_ARCHITECTURE = "aarch64"
 
 
-def compare(document: dict, expected: dict[str, str]) -> tuple[list[str], list[str]]:
+class Platform(BaseModel):
+    """`platform.system()` and `platform.release()` inside the container."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    system: str
+    release: str
+
+
+class OsRelease(BaseModel):
+    """`/etc/os-release`, as far as this module reads it. probe.py writes `{}` when unreadable."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    ID: str | None = None
+    VERSION_ID: str | None = None
+    PRETTY_NAME: str | None = None
+
+
+class ToolProbe(BaseModel):
+    """One tool: whether it ran, its first output line, and the version parsed out of it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    present: bool
+    version: str | None = None
+    output: str | None = None
+
+
+class UnoProbe(BaseModel):
+    """Whether `import uno` succeeded, and what it printed when it did not."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    imports: bool
+    error: str | None = None
+
+
+class ProbeDocument(BaseModel):
+    """The document probe.py writes. probe.py is its only writer and stays standard library."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    # `schema` shadows a `BaseModel` attribute, so the field carries the key as an alias.
+    schema_: int = Field(alias="schema")
+    platform: Platform
+    architecture: str
+    os_release: OsRelease
+    tools: dict[str, ToolProbe]
+    uno: UnoProbe
+    font_families: int | None
+    pip_freeze: list[str]
+    npm_globals: dict[str, str | None]
+    node_path: str | None = None
+
+
+# A tool the document does not name was not found.
+NOT_PROBED = ToolProbe(present=False)
+
+
+def compare(document: ProbeDocument, expected: dict[str, str]) -> tuple[list[str], list[str]]:
     """The failures and the notes, in the order docs/docker.md's delta table lists them."""
     failures: list[str] = []
     notes: list[str] = []
 
-    found = pins("\n".join(document.get("pip_freeze", [])))
+    found = pins("\n".join(document.pip_freeze))
     for name, version in sorted(expected.items()):
         if name not in found:
             failures.append(f"pin missing: {name}=={version}")
@@ -113,7 +174,7 @@ def compare(document: dict, expected: dict[str, str]) -> tuple[list[str], list[s
     for name in sorted(set(found) - set(expected)):
         notes.append(f"extra package: {name}=={found[name]}")
 
-    modules = document.get("npm_globals", {})
+    modules = document.npm_globals
     for name, version in sorted(NPM_GLOBALS.items()):
         if name not in modules:
             failures.append(f"npm package missing: {name}@{version}")
@@ -121,68 +182,63 @@ def compare(document: dict, expected: dict[str, str]) -> tuple[list[str], list[s
             failures.append(f"npm package moved: {name}@{modules[name]}, expected {version}")
     for name in sorted(set(modules) - set(NPM_GLOBALS)):
         notes.append(f"extra npm package: {name}@{modules[name]}")
-    if document.get("node_path") != NODE_PATH:
-        failures.append(f"NODE_PATH: {document.get('node_path')}, expected {NODE_PATH}")
+    if document.node_path != NODE_PATH:
+        failures.append(f"NODE_PATH: {document.node_path}, expected {NODE_PATH}")
 
-    tools = document.get("tools", {})
+    tools = document.tools
     unlisted = sorted(
         set(probe.VERSION_COMMANDS) - set(EXPECTED_VERSIONS) - set(ABSENT) - set(PRESENT)
     )
     if unlisted:
         failures.append(f"tool probed and never compared: {', '.join(unlisted)}")
     for name in ABSENT:
-        if tools.get(name, {}).get("present"):
+        if tools.get(name, NOT_PROBED).present:
             failures.append(f"tool recorded as absent is present: {name}")
 
-    uno = document.get("uno", {})
-    if not uno.get("imports"):
-        failures.append(f"import uno failed: {uno.get('error') or 'no detail reported'}")
+    uno = document.uno
+    if not uno.imports:
+        failures.append(f"import uno failed: {uno.error or 'no detail reported'}")
 
     for name, version in sorted(EXPECTED_VERSIONS.items()):
-        reported = tools.get(name, {})
-        if not reported.get("present"):
+        reported = tools.get(name, NOT_PROBED)
+        if not reported.present:
             notes.append(f"tool absent: {name}, expected {version}")
         # The probe parses a dotted version out of the tool's own line. A build suffix
         # such as ImageMagick's `-60` is in that line and not in the parsed version, so
         # the line is the second place to look before calling it a difference.
-        elif reported.get("version") != version and version not in (reported.get("output") or ""):
-            notes.append(
-                f"tool version differs: {name} {reported.get('version')}, expected {version}"
-            )
+        elif reported.version != version and version not in (reported.output or ""):
+            notes.append(f"tool version differs: {name} {reported.version}, expected {version}")
 
     for name in PRESENT:
-        if not tools.get(name, {}).get("present"):
+        if not tools.get(name, NOT_PROBED).present:
             notes.append(f"tool absent: {name}, no version recorded")
 
-    families = document.get("font_families")
+    families = document.font_families
     if families != EXPECTED_FONT_FAMILIES:
         notes.append(f"font families: {families}, expected {EXPECTED_FONT_FAMILIES}")
 
-    release = document.get("os_release", {})
-    if release.get("ID") != EXPECTED_OS_ID or release.get("VERSION_ID") != EXPECTED_OS_VERSION_ID:
+    release = document.os_release
+    if release.ID != EXPECTED_OS_ID or release.VERSION_ID != EXPECTED_OS_VERSION_ID:
         notes.append(
-            f"OS: {release.get('ID')} {release.get('VERSION_ID')}, "
+            f"OS: {release.ID} {release.VERSION_ID}, "
             f"expected {EXPECTED_OS_ID} {EXPECTED_OS_VERSION_ID}"
         )
-    if document.get("architecture") != EXPECTED_ARCHITECTURE:
-        notes.append(
-            f"architecture: {document.get('architecture')}, expected {EXPECTED_ARCHITECTURE}"
-        )
+    if document.architecture != EXPECTED_ARCHITECTURE:
+        notes.append(f"architecture: {document.architecture}, expected {EXPECTED_ARCHITECTURE}")
 
     return failures, notes
 
 
-def report(document: dict, failures: list[str], notes: list[str]) -> None:
+def report(document: ProbeDocument, failures: list[str], notes: list[str]) -> None:
     """The platform the probe actually ran on comes first.
 
     An x86 run is never read as an aarch64 one.
     """
-    release = document.get("os_release", {})
     print(
-        f"probed: {release.get('PRETTY_NAME', 'unknown OS')} "
-        f"{document.get('architecture', 'unknown architecture')}, "
-        f"{len(document.get('pip_freeze', []))} packages, "
-        f"{document.get('font_families')} font families"
+        f"probed: {document.os_release.PRETTY_NAME or 'unknown OS'} "
+        f"{document.architecture or 'unknown architecture'}, "
+        f"{len(document.pip_freeze)} packages, "
+        f"{document.font_families} font families"
     )
     for note in notes:
         print(f"note: {note}")
@@ -196,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("probe", type=Path, help="the JSON document docker/probe.py wrote")
     arguments = parser.parse_args(argv)
 
-    document = json.loads(arguments.probe.read_text())
+    document = ProbeDocument.model_validate_json(arguments.probe.read_text())
     expected = pins(REQUIREMENTS.read_text())
     failures, notes = compare(document, expected)
     report(document, failures, notes)
