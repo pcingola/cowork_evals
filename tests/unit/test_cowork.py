@@ -48,8 +48,10 @@ def transcript_ages() -> None:
 def test_sessions_finds_every_session_and_nothing_else(driver: CoWork) -> None:
     found = driver.sessions(ROOT)
     assert [path.name for path in found] == [
+        "mismatched_prompt",
         "no_output",
         "no_transcript",
+        "no_user_record",
         "one_turn",
         "partial_line",
         "subagent",

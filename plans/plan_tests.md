@@ -139,7 +139,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 
 - [x] [`tests/conftest.py`](plan_tests/conftest.md), and the new `tests/unit/conftest.py` with the shared helpers that file's rows propose.
 - [x] [`tests/integration/conftest.py`](plan_tests/integration_conftest.md), with `Config.dump` users and the `images` fixture.
-- [ ] [`tests/data/`](plan_tests/data.md): add every proposed fixture and fix every `FIX` fixture. Deletion of unread fixtures is the last box of this phase.
+- [x] [`tests/data/`](plan_tests/data.md): add every proposed fixture and fix every `FIX` fixture. Deletion of unread fixtures is the last box of this phase.
 - [ ] [`tests/unit/test_cases.py`](plan_tests/unit_test_cases.md)
 - [ ] [`tests/unit/test_results.py`](plan_tests/unit_test_results.md)
 - [ ] [`tests/unit/test_validate.py`](plan_tests/unit_test_validate.md), with the `_check_violations` change and the `duplicate-checks` case the "Decisions" table names.
