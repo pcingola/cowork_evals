@@ -12,6 +12,7 @@ before changing anything under it. Never restate one of these in another file; l
 | Index               | Owns                                                     |
 | ------------------- | -------------------------------------------------------- |
 | `README.md`         | What the repo is, and the public repository rule         |
+| `assets/README.md`  | The images `README.md` shows, and the rules for an image |
 | `docs/README.md`    | Reference material: boundary, command, runtime, harness  |
 | `plans/README.md`   | How a plan is structured and executed                    |
 | `plugins/README.md` | The fixture plugins, and what they are not               |

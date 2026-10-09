@@ -37,9 +37,9 @@ SDIST="$(echo dist/*.tar.gz)"
 WHEEL_FILES="$(unzip -Z1 "$WHEEL")"
 SDIST_FILES="$(tar tzf "$SDIST")"
 
-# What ships beside the modules. docs/library.md holds the table. The two documents named
-# here are the ones a consumer cannot work without: the authoring contract, and the vendored
-# field reference it defers to.
+# What ships beside the modules. docs/library.md holds the table. The three documents named
+# here are the authoring contract, the vendored field reference it defers to, and the
+# suggestions for designing a suite, which the cowork-evals skill sends a consumer to.
 for member in \
   cowork_evals/data/requirements.txt \
   cowork_evals/data/requirements_installable.txt \
@@ -51,6 +51,7 @@ for member in \
   cowork_evals/docker/Dockerfile \
   cowork_evals/docker/Dockerfile.pytest \
   cowork_evals/docs/eval_format.md \
+  cowork_evals/docs/eval_design.md \
   cowork_evals/docs/claude_code/plugin_eval_reference.md; do
   grep -qx "$member" <<< "$WHEEL_FILES" || die "$member is missing from the wheel"
 done
@@ -65,7 +66,7 @@ SDIST_DOCS="$(grep -c "/docs/" <<< "$SDIST_FILES" || true)"
 # No development directory ships. The sdist include list in pyproject.toml is the rule. A
 # directory is matched at the top of the sdist only: a shipped skill has a `scripts/` of its own.
 # `docs/` is not one: it is the consumer's reference and ships. docs/library.md.
-for directory in scripts tests plans plugins; do
+for directory in scripts tests plans plugins assets; do
   if grep -q "^[^/]*/$directory/" <<< "$SDIST_FILES"; then
     die "$directory/ is in the sdist"
   fi

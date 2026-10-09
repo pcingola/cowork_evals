@@ -389,3 +389,11 @@ def test_the_traces_key_reads_a_boolean_and_refuses_anything_else(tmp_path: Path
     with pytest.raises(CoWorkError) as raised:
         Config.load(written)
     assert "eval.keep_traces: expected true or false, got str" in str(raised.value)
+
+
+def test_no_votes_at_all_is_refused_at_load(tmp_path: Path) -> None:
+    """Zero turns every judged assertion into a lost vote, so it is refused."""
+    written = write(tmp_path, "eval:\n  judge_votes: 0\n")
+    with pytest.raises(CoWorkError) as raised:
+        Config.load(written)
+    assert "at or above one" in str(raised.value)

@@ -1,6 +1,6 @@
 ---
 name: cowork-evals
-description: Write and run evals for Claude CoWork skills and plugins with the cowork_evals command, and run a plugin's own pytest suite on the CoWork runtime. TRIGGER when writing or fixing an eval case, a prompt.md, a grader or a check under an evals/ directory, when a cowork_evals command fails, when configuring cowork_evals.yaml, or when writing plugin code that has to run inside a CoWork session.
+description: "Two uses of cowork_evals: evals of a CoWork plugin (run) and pytest of its code on the CoWork runtime (test). TRIGGER when: writing or fixing an eval case, grader or check, or a plugin's tests, or running any cowork_evals command."
 ---
 
 # cowork_evals
@@ -15,6 +15,7 @@ file is the authority for anything below.
 
 | Question                                | Read                     |
 | --------------------------------------- | ------------------------ |
+| Which cases to write, and which assertion answers what | `docs eval_design`   |
 | How to write a case, field by field     | `docs eval_format`       |
 | Every verb, option and exit code        | `docs cli`               |
 | Which backend proves what, and its cost | `docs approaches`        |

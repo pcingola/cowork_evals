@@ -30,6 +30,7 @@ a check and a run with no collected files are each a check result carrying the r
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import importlib.util
 import json
@@ -51,8 +52,12 @@ from .traces import LAST_MESSAGE_NAME, TRACE_NAME, WORKSPACE_NAME
 # The attribute `@check` writes, and the grader type a check result carries in the document.
 # `check` is not in `cases.JUDGED`, so `verdict._judge_grader` decides a failed one the way it
 # decides a failed structural grader, with no new condition anywhere. docs/checks.md.
+# The attribute is there when the function is a check, and it holds whether it is advisory.
 MARKER = "__cowork_evals_check__"
 CHECK_TYPE = "check"
+
+# The type an advisory check's definition carries, which is how the verdict tells them apart.
+ADVISORY_TYPE = "check-advisory"
 
 # Every check weighs the same. There is no weight on `@check` and no way to write one.
 WEIGHT = 1
@@ -199,12 +204,15 @@ class Run:
 
         text = judging.compose_paths(prompt, tuple(names))
         argv = judging.check_argv(self.judge_model, tuple(add_dirs))
-        replies = [judging.ask(argv, text, cwd=root) for _ in range(judging.VOTES)]
+        replies = [judging.ask(argv, text, cwd=root) for _ in range(judging.resolve_votes())]
         judged = judging.tally(_judge_grader(prompt), replies, "\n".join(names))
         self.calls.append(
             JudgeCall(
                 prompt=text,
-                replies=tuple(reply.word for reply in replies),
+                replies=tuple(
+                    f"{reply.word}: {reply.reasoning}" if reply.reasoning else reply.word
+                    for reply in replies
+                ),
                 cost_usd=judged.cost_usd,
             )
         )
@@ -224,6 +232,7 @@ class Check:
     path: Path
     function: Callable[[Run], Any] | None = None
     error: str | None = None
+    advisory: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,6 +248,7 @@ class Outcome:
     traceback: str | None = None
     calls: tuple[JudgeCall, ...] = ()
     cost_usd: float = 0.0
+    advisory: bool = False
 
     def document(self) -> dict[str, Any]:
         """One `checks.jsonl` line."""
@@ -272,13 +282,20 @@ def _judge_grader(prompt: str) -> Grader:
     )
 
 
-def check(function: Callable[[Run], Any]) -> Callable[[Run], Any]:
-    """Mark one function as a check. It takes no arguments, and there is no second form.
+def check(
+    function: Callable[[Run], Any] | None = None, *, advisory: bool = False
+) -> Callable[[Run], Any] | Callable[[Callable[[Run], Any]], Callable[[Run], Any]]:
+    """Mark one function as a check. `@check` and `@check(advisory=True)` are the two forms.
 
     A name parameter and a weight parameter are features nobody asked for: the name is the
     file stem and the function name, and every check weighs 1.
+
+    An advisory check runs, its verdict is recorded, and a failure prints as a note: it is out
+    of the score and out of the exit code. docs/checks.md.
     """
-    setattr(function, MARKER, True)
+    if function is None:
+        return functools.partial(check, advisory=advisory)  # type: ignore[return-value]
+    setattr(function, MARKER, advisory)
     return function
 
 
@@ -333,10 +350,10 @@ def _load(path: Path) -> list[Check]:
     except Exception as error:  # the author's own file, and anything it raises at import
         return [Check(name=path.stem, path=path, error=_reason(path, error))]
     return [
-        Check(name=f"{path.stem}.{name}", path=path, function=held)
+        Check(name=f"{path.stem}.{name}", path=path, function=held, advisory=getattr(held, MARKER))
         for name, held in vars(module).items()
         if callable(held)
-        and getattr(held, MARKER, False)
+        and hasattr(held, MARKER)
         and getattr(held, "__module__", None) == module.__name__
     ]
 
@@ -411,6 +428,7 @@ def execute(one: Check, run: Run) -> Outcome:
             duration_seconds=time.monotonic() - started,
             calls=tuple(run.calls),
             cost_usd=sum(call.cost_usd for call in run.calls),
+            advisory=one.advisory,
         )
     except Exception as error:  # the author's own code, and any exception it raises
         return Outcome(
@@ -421,6 +439,7 @@ def execute(one: Check, run: Run) -> Outcome:
             traceback=traceback.format_exc(),
             calls=tuple(run.calls),
             cost_usd=sum(call.cost_usd for call in run.calls),
+            advisory=one.advisory,
         )
     passed, explanation = _verdict(returned)
     return Outcome(
@@ -430,6 +449,7 @@ def execute(one: Check, run: Run) -> Outcome:
         duration_seconds=time.monotonic() - started,
         calls=tuple(run.calls),
         cost_usd=sum(call.cost_usd for call in run.calls),
+        advisory=one.advisory,
     )
 
 
@@ -492,9 +512,10 @@ def build_run(directory: Path, case_dir: Path, index: int, judge_model: str) -> 
     )
 
 
-def definition(name: str) -> dict[str, Any]:
+def definition(name: str, advisory: bool = False) -> dict[str, Any]:
     """One check's entry in the case's `graders[]`, so the verdict can join a result to it."""
-    return {"name": name, "type": CHECK_TYPE, "weight": WEIGHT, "config": {}}
+    kind = ADVISORY_TYPE if advisory else CHECK_TYPE
+    return {"name": name, "type": kind, "weight": WEIGHT, "config": {}}
 
 
 def grader_result(outcome: Outcome) -> dict[str, Any]:
@@ -505,7 +526,7 @@ def grader_result(outcome: Outcome) -> dict[str, Any]:
         "weight": WEIGHT,
         "explanation": outcome.explanation,
         "withOnly": False,
-        "scored": not outcome.skipped,
+        "scored": not outcome.skipped and not outcome.advisory,
     }
     if outcome.skipped:
         entry["skipped"] = True
@@ -645,7 +666,7 @@ def _each_case(
     case_dir = plugin / str(case.get("dir") or "")
     definitions = case.setdefault("graders", [])
     if isinstance(definitions, list):
-        definitions += [definition(one.name) for one in checks]
+        definitions += [definition(one.name, one.advisory) for one in checks]
 
     spent = 0.0
     arms = case.get("arms") or {}

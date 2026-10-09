@@ -18,13 +18,15 @@ from cowork_evals.judge import (
     CHECK_INSTRUCTION,
     CHECK_TOOLS,
     EVIDENCE_LIMIT,
+    FAIL_WORD,
     FILES_CLOSE,
     FILES_OPEN,
     INSTRUCTION,
     MATERIAL_CLOSE,
     MATERIAL_LIMIT,
     MATERIAL_OPEN,
-    VOTES,
+    PASS_WORD,
+    VERDICT_SCHEMA,
     Reply,
     check_argv,
     compose,
@@ -81,6 +83,8 @@ def test_judge_argv_is_claude_p_with_the_model_and_strict_mcp_config() -> None:
         "--model",
         "haiku",
         "--strict-mcp-config",
+        "--json-schema",
+        json.dumps(VERDICT_SCHEMA),
     ]
 
 
@@ -117,12 +121,6 @@ def test_the_check_judge_is_shown_the_paths_and_never_the_material() -> None:
     assert compose_paths("Every slide carries a title.", ("scratch/deck.png", "/tmp/x.pdf")) == (
         "Every slide carries a title.\n\n"
         f"{FILES_OPEN}\nscratch/deck.png\n/tmp/x.pdf\n{FILES_CLOSE}\n\n{CHECK_INSTRUCTION}"
-    )
-
-
-def test_the_check_instruction_asks_for_a_read_and_then_one_word() -> None:
-    assert CHECK_INSTRUCTION == (
-        "Read each file named above, then answer with exactly one word: PASS or FAIL."
     )
 
 
@@ -289,7 +287,7 @@ def test_a_lost_vote_is_not_a_pass() -> None:
 
 
 def test_three_lost_votes_are_a_failed_grader_naming_the_reason() -> None:
-    judged = tally(grader("llm"), [Reply(error="claude exited 1")] * VOTES, "Hello.")
+    judged = tally(grader("llm"), [Reply(error="claude exited 1")] * 3, "Hello.")
     assert judged.result.passed is False
     assert judged.result.judge_votes is None
     assert judged.result.explanation == "the judge could not be asked: claude exited 1"
@@ -299,3 +297,51 @@ def test_the_evidence_is_truncated() -> None:
     judged = tally(grader("llm"), [read_reply(recorded("reply_pass"))] * 3, "x" * 5000)
     assert judged.result.evidence is not None
     assert len(judged.result.evidence) == EVIDENCE_LIMIT + len("\n...\n")
+
+
+# A judge that reasons and still votes. docs/checks.md.
+
+
+def reasoned(verdict: str, reasoning: str) -> str:
+    """One `claude -p --output-format json` document, as `--json-schema` makes the CLI print it."""
+    answer = {"verdict": verdict, "reasoning": reasoning}
+    return json.dumps(
+        {"result": json.dumps(answer), "structured_output": answer, "total_cost_usd": 0.0021}
+    )
+
+
+def test_a_reasoned_reply_votes_and_its_reason_reaches_the_grader() -> None:
+    """Under the old rule a reply longer than one word was a lost vote, so this grader failed."""
+    replies = [read_reply(reasoned(PASS_WORD, "xlsx.sh dedup ran")) for _ in range(3)]
+    judged = tally(grader("llm"), replies, "Hello.")
+    assert judged.result.passed is True
+    assert judged.result.judge_votes == (True, True, True)
+    assert "xlsx.sh dedup ran" in judged.result.explanation
+    assert judged.cost_usd == pytest.approx(0.0063)
+
+
+def test_the_majority_decides_and_carries_the_winning_side_s_reason() -> None:
+    replies = [
+        read_reply(reasoned(PASS_WORD, "the command ran")),
+        read_reply(reasoned(FAIL_WORD, "a script wrote it")),
+        read_reply(reasoned(PASS_WORD, "the command is in the trace")),
+    ]
+    judged = tally(grader("llm"), replies, "Hello.")
+    assert judged.result.passed is True
+    assert "the command ran" in judged.result.explanation
+    assert "a script wrote it" not in judged.result.explanation
+
+
+def test_a_verdict_outside_the_schema_is_a_lost_vote() -> None:
+    replies = [read_reply(reasoned("UNSURE", "the trace is ambiguous")) for _ in range(3)]
+    judged = tally(grader("llm"), replies, "Hello.")
+    assert judged.result.passed is False
+    assert judged.result.judge_votes is None
+    assert "UNSURE" in judged.result.explanation
+
+
+def test_a_bare_word_reply_still_votes() -> None:
+    """What a CLI too old for `--json-schema` leaves. It votes, and explains nothing."""
+    judged = tally(grader("llm"), [read_reply(recorded("reply_pass"))] * 3, "Hello.")
+    assert judged.result.passed is True
+    assert judged.result.explanation == "judge votes: PASS PASS PASS"

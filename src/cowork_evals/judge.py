@@ -1,9 +1,12 @@
-"""The judge behind the `llm` and `baseline` graders: `claude -p`, three votes, majority.
+"""The judge behind the `llm` and `baseline` graders: `claude -p`, a vote count, a majority.
 
-The rubric and the material go to the model as one text on stdin, three times, and the grader
-passes on two `PASS` votes. There is no SDK and no second credential route: the signed-in
-`claude` on `PATH` is the one route, and `docs/cli.md` makes it part of the `--cowork`
-preflight.
+The rubric and the material go to the model as one text on stdin, once per `eval.judge_votes`,
+and the grader passes on a majority of `PASS` votes. There is no SDK and no second credential
+route: the signed-in `claude` on `PATH` is the one route, and `docs/cli.md` makes it part of the
+`--cowork` preflight.
+
+`--json-schema` makes the reply carry a `verdict` and the `reasoning` behind it. A reply carrying
+none is read as a bare word, which is what an older CLI leaves.
 
 A judged grader never decides the verdict, which is the pass and fail table in
 docs/running_evals.md, so nothing here raises. A file the judge cannot be shown is a failed
@@ -13,9 +16,7 @@ image, and one text call cannot.
 The check judge is the second caller, and it is this package's own rather than the harness's.
 It has its own argument list and its own material rule: it is granted `Read`, `Glob` and
 `Grep`, it runs in the run directory, and it is shown paths rather than text. Everything below
-those two is shared, the three votes and the majority included. The `llm` grader is untouched
-by any of it, because that grader matches the harness exactly and a check matches nothing
-outside this package. docs/checks.md.
+those two is shared, the vote count, the majority and the schema included. docs/checks.md.
 
 `CLAUDE_CODE_WALNUT_SPIRE` is not exported here. It enables `claude plugin eval`, and this is
 `claude -p`.
@@ -33,10 +34,6 @@ from .cases import Grader
 from .config import Config
 from .grader import GraderResult, failed, produced_file, resolve_target, skipped
 
-# Three votes, and a majority of them. docs/eval_format.md.
-VOTES = 3
-MAJORITY = 2
-
 # What the judge is shown, and what is recorded of it. The first is what the harness shows
 # a judge; the second is what a result document keeps as `evidence`.
 MATERIAL_LIMIT = 100_000
@@ -48,10 +45,32 @@ PASS_WORD = "PASS"
 FAIL_WORD = "FAIL"
 LOST_WORD = "LOST"
 
+# The shape a vote comes back in, enforced by the CLI rather than parsed here. `--json-schema`
+# makes `--output-format json` carry a `structured_output` object beside the `result` string.
+# Measured on CLI 2.1.273.
+VERDICT_KEY = "verdict"
+REASONING_KEY = "reasoning"
+STRUCTURED_KEY = "structured_output"
+VERDICT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        REASONING_KEY: {"type": "string"},
+        VERDICT_KEY: {"type": "string", "enum": [PASS_WORD, FAIL_WORD]},
+    },
+    "required": [REASONING_KEY, VERDICT_KEY],
+    "additionalProperties": False,
+}
+
+# How much of the winning reply's reasoning the printed line carries.
+REASONING_HEAD = 400
+
 # The composed text. The rubric first, the material fenced, the instruction last.
 MATERIAL_OPEN = "--- MATERIAL ---"
 MATERIAL_CLOSE = "--- END MATERIAL ---"
-INSTRUCTION = f"Answer with exactly one word: {PASS_WORD} or {FAIL_WORD}."
+INSTRUCTION = (
+    f"Say what in the material decided it, then answer {PASS_WORD} or {FAIL_WORD}. "
+    f"The schema carries both: the reason in {REASONING_KEY!r}, the answer in {VERDICT_KEY!r}."
+)
 
 # A baseline grader shows the judge two trajectories, and says which is which.
 BASELINE_HEADING = "BASELINE TRAJECTORY:"
@@ -63,7 +82,9 @@ CHECK_TOOLS = ("Read", "Glob", "Grep")
 FILES_OPEN = "--- FILES ---"
 FILES_CLOSE = "--- END FILES ---"
 CHECK_INSTRUCTION = (
-    f"Read each file named above, then answer with exactly one word: {PASS_WORD} or {FAIL_WORD}."
+    "Read each file named above. Take as many turns as the question needs. Then say what you "
+    f"found that decided it, and answer {PASS_WORD} or {FAIL_WORD}. The schema carries both: the "
+    f"reason in {REASONING_KEY!r}, the answer in {VERDICT_KEY!r}."
 )
 
 # Image magic, from the file's bytes and never from its name, as the harness detects it.
@@ -92,6 +113,7 @@ class Reply:
     vote: bool | None = None
     cost_usd: float = 0.0
     error: str | None = None
+    reasoning: str = ""
 
     @property
     def word(self) -> str:
@@ -115,10 +137,18 @@ def resolve_model(judge_model: str | None = None, config: Config | None = None) 
     return (config if config is not None else Config.load()).eval.judge_model
 
 
+def resolve_votes(votes: int | None = None, config: Config | None = None) -> int:
+    """The caller's vote count where one was given, and `eval.judge_votes` otherwise."""
+    if votes is not None:
+        return votes
+    return (config if config is not None else Config.load()).eval.judge_votes
+
+
 def judge_argv(model: str) -> list[str]:
     """One vote's command line. The composed text goes on stdin, never in the argument list.
 
-    `--strict-mcp-config` keeps the developer's own MCP servers out of a text vote.
+    `--strict-mcp-config` keeps the developer's own MCP servers out of a text vote, and
+    `--json-schema` is here so both callers read one shape.
     """
     return [
         "claude",
@@ -128,6 +158,8 @@ def judge_argv(model: str) -> list[str]:
         "--model",
         model,
         "--strict-mcp-config",
+        "--json-schema",
+        json.dumps(VERDICT_SCHEMA),
     ]
 
 
@@ -265,9 +297,10 @@ def _as_text(content: bytes) -> str | None:
 
 
 def read_reply(stdout: str) -> Reply:
-    """One vote and its spend, from one `--output-format json` document.
+    """One vote, its reasoning and its spend, from one `--output-format json` document.
 
-    A reply that is neither word is a lost vote, and a lost vote is not a `PASS`.
+    A document carrying `structured_output` is read from it, and any other from `result` as a bare
+    word. A reply that is neither word is a lost vote, and a lost vote is not a `PASS`.
     """
     try:
         payload = json.loads(stdout)
@@ -277,6 +310,21 @@ def read_reply(stdout: str) -> Reply:
         return Reply(error="the judge printed no JSON document")
     cost = payload.get("total_cost_usd")
     spent = float(cost) if isinstance(cost, int | float) else 0.0
+
+    structured = payload.get(STRUCTURED_KEY)
+    if isinstance(structured, dict):
+        verdict = structured.get(VERDICT_KEY)
+        reasoning = structured.get(REASONING_KEY)
+        said = reasoning.strip() if isinstance(reasoning, str) else ""
+        word = verdict.strip().upper() if isinstance(verdict, str) else ""
+        if word in (PASS_WORD, FAIL_WORD):
+            return Reply(vote=word == PASS_WORD, cost_usd=spent, reasoning=said)
+        return Reply(
+            cost_usd=spent,
+            reasoning=said,
+            error=f"the judge's {VERDICT_KEY} was neither word: {str(verdict)[:80]!r}",
+        )
+
     answer = payload.get("result")
     if not isinstance(answer, str):
         return Reply(cost_usd=spent, error="the judge document carries no result")
@@ -289,19 +337,22 @@ def read_reply(stdout: str) -> Reply:
 
 
 def tally(grader: Grader, replies: list[Reply], evidence: str) -> Judged:
-    """The verdict over the votes cast. Every reply's spend counts, lost or not."""
+    """The verdict over the votes cast, and what the winning side said. Every spend counts."""
     cost = sum(reply.cost_usd for reply in replies)
     votes = [reply.vote for reply in replies]
     words = " ".join(reply.word for reply in replies)
     if all(vote is None for vote in votes):
         reasons = sorted({reply.error for reply in replies if reply.error})
         return Judged(failed(grader, f"the judge could not be asked: {'; '.join(reasons)}"), cost)
+    # A majority: one vote needs one pass, and three need two.
+    passed = sum(1 for vote in votes if vote) >= len(replies) // 2 + 1
+    said = next((one.reasoning for one in replies if one.vote is passed and one.reasoning), "")
     return Judged(
         GraderResult(
             name=grader.name,
-            passed=sum(1 for vote in votes if vote) >= MAJORITY,
+            passed=passed,
             weight=grader.weight,
-            explanation=f"judge votes: {words}",
+            explanation=f"judge votes: {words}" + (f". {said[:REASONING_HEAD]}" if said else ""),
             judge_votes=tuple(bool(vote) for vote in votes),
             evidence=truncate(evidence, EVIDENCE_LIMIT),
         ),
@@ -310,7 +361,7 @@ def tally(grader: Grader, replies: list[Reply], evidence: str) -> Judged:
 
 
 def grade(grader: Grader, document: dict[str, Any], case_dir: Path | str, *, model: str) -> Judged:
-    """One judged grader: compose once, vote three times, count."""
+    """One judged grader: compose once, vote as many times as configured, count."""
     shown = material(grader, document, Path(case_dir))
     if shown.skip_reason is not None:
         return Judged(skipped(grader, shown.skip_reason))
@@ -318,7 +369,7 @@ def grade(grader: Grader, document: dict[str, Any], case_dir: Path | str, *, mod
         return Judged(failed(grader, shown.error))
 
     text = compose(criteria(grader), shown.text)
-    replies = [_vote(model, text) for _ in range(VOTES)]
+    replies = [_vote(model, text) for _ in range(resolve_votes())]
     return tally(grader, replies, shown.text)
 
 

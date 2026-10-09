@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from .cases import JUDGED
+from .checks import ADVISORY_TYPE
 from .config import ABLATION_WITH_WITHOUT
 from .harness import RESULT_NAME
 from .results import ARM_WITH, ARM_WITHOUT, DECLARED_UNRUNNABLE
@@ -384,6 +385,11 @@ def _judge_grader(
         return
     if result.get("skipped"):
         failures.append(f"{FAIL} {at}: the grader was skipped: {result.get('skipReason')}")
+        return
+    if definitions[name] == ADVISORY_TYPE:
+        if not result.get("passed"):
+            said = result.get("explanation")
+            notes.append(f"{NOTE} {at}: the advisory check failed: {said}{kept}")
         return
     if not result.get("scored", True):
         if not arms:

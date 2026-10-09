@@ -74,6 +74,7 @@ own.
 | `docs/`                                           | yes   | Every document in this tree, at `cowork_evals/docs/` in the wheel        |
 | `scripts/`                                        | no    | Development tasks for this repository only                               |
 | `tests/`, `plugins/`, `plans/`                    | no    | Development material                                                     |
+| `assets/`                                         | no    | The images `README.md` shows                                             |
 
 Each module under `src/cowork_evals/` states in its own docstring what it holds. A consumer
 never sees `scripts/`: those are the tasks that build this repository's environments, run its
@@ -105,7 +106,7 @@ runs in a session, is the third.
 
 | Skill          | Fires on                                                                                                                          | Holds                                                                             |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `cowork-evals` | Writing or fixing a case, a `prompt.md` or a grader, a failing command, the configuration file, plugin code that runs in a session | The case tree, the addressability keys, the grader types and idioms, the authoring traps, the exit codes and the runtime constraint |
+| `cowork-evals` | Writing or fixing an eval case, a grader or a check, a plugin's tests, and running any `cowork_evals` command | The case tree, the addressability keys, the grader types and idioms, the authoring traps, the exit codes, the runtime constraint, and where to read which cases to write: [eval_design.md](eval_design.md) |
 | `cowork-ask`   | A question about what a live CoWork session does, a claim that has to be confirmed in the product, a failing `cowork_evals ask`    | The verb, what one ask costs, and the rule that the session is asked to do the thing and what it did is read back |
 | `cowork-skill-author` | Creating, reviewing or validating a skill, and whether plugin code runs in a session | The plugin and skill layout, the frontmatter and wrapper conventions, the review checklist, a condensed [runtime.md](runtime.md) and the session's `pip freeze` |
 
