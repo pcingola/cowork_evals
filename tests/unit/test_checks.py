@@ -310,8 +310,10 @@ def collected_runs(directory: Path, case: str, count: int) -> list[Path]:
     return made
 
 
-def case_entry(name: str, where: str, runs: list[Path], **extra: Any) -> dict[str, Any]:
-    """One case of a v1 document, passing on one `file_exists` grader before any check runs."""
+def case_entry(
+    name: str, where: str, runs: list[Path], *, passed: bool = True, **extra: Any
+) -> dict[str, Any]:
+    """One case of a v1 document, its one `file_exists` grader passing or not before any check."""
     return {
         "name": name,
         "dir": where,
@@ -321,8 +323,8 @@ def case_entry(name: str, where: str, runs: list[Path], **extra: Any) -> dict[st
         "arms": {
             "with": [
                 {
-                    "score": 1.0,
-                    "passed": True,
+                    "score": float(passed),
+                    "passed": passed,
                     "turns": 1,
                     "costUsd": 0.01,
                     "judgeCostUsd": 0.002,
@@ -332,7 +334,7 @@ def case_entry(name: str, where: str, runs: list[Path], **extra: Any) -> dict[st
                     "graders": [
                         {
                             "name": "wrote-it",
-                            "passed": True,
+                            "passed": passed,
                             "weight": 1,
                             "explanation": "created written.txt",
                             "withOnly": False,
@@ -348,7 +350,9 @@ def case_entry(name: str, where: str, runs: list[Path], **extra: Any) -> dict[st
     }
 
 
-def suite(tmp_path: Path, cases: list[dict[str, Any]]) -> Path:
+def suite(
+    tmp_path: Path, cases: list[dict[str, Any]], ablation: str = "none", **aggregates: Any
+) -> Path:
     """One plugin's output directory, holding the document those cases make up."""
     directory = tmp_path / "smoke"
     directory.mkdir(parents=True, exist_ok=True)
@@ -361,7 +365,7 @@ def suite(tmp_path: Path, cases: list[dict[str, Any]]) -> Path:
         "partial": False,
         "suite": {
             "root": str(PLUGIN),
-            "ablation": "none",
+            "ablation": ablation,
             "threshold": 0,
             "judgeModel": "haiku",
             "plugins": [{"name": "smoke", "path": str(PLUGIN)}],
@@ -372,6 +376,7 @@ def suite(tmp_path: Path, cases: list[dict[str, Any]]) -> Path:
             "casesPassed": len(cases),
             "overallScore": 1.0,
             "overallPassRate": 1.0,
+            **aggregates,
         },
     }
     (directory / RESULT_NAME).write_text(json.dumps(document, indent=2), encoding="utf-8")
@@ -525,7 +530,8 @@ def test_a_declared_case_produces_no_check_result(tmp_path: Path) -> None:
     assert document["cases"][0]["arms"]["with"] == []
 
 
-def test_only_the_with_arm_is_walked(tmp_path: Path) -> None:
+def test_every_arm_is_walked(tmp_path: Path) -> None:
+    """The baseline arm's runs are collected like any other, so the checks reach them too."""
     directory = tmp_path / "smoke"
     directory.mkdir(parents=True)
     runs = collected_runs(directory, "checked", 1)
@@ -538,8 +544,43 @@ def test_only_the_with_arm_is_walked(tmp_path: Path) -> None:
     assert checks.run(directory, PLUGIN, judge_model="haiku") == []
     document = rerun(directory)
     assert len(one(document)["graders"]) == 5
-    assert len(document["cases"][0]["arms"]["without"][0]["graders"]) == 1
-    assert not (directory / "traces" / "checked-without" / "run-1" / checks.CHECKS_FILE).exists()
+    assert len(document["cases"][0]["arms"]["without"][0]["graders"]) == 5
+    assert (directory / "traces" / "checked-without" / "run-1" / checks.CHECKS_FILE).is_file()
+
+
+def two_arms(tmp_path: Path, aggregates: dict[str, Any], **suite_aggregates: Any) -> dict[str, Any]:
+    """One case on both arms, its baseline failing the harness grader, after the layer ran."""
+    directory = tmp_path / "smoke"
+    directory.mkdir(parents=True)
+    where = "evals/plugin/checked"
+    without = collected_runs(directory, "checked-without", 1)
+    entry = case_entry(
+        "checked", where, collected_runs(directory, "checked", 1), aggregates=aggregates
+    )
+    entry["arms"]["without"] = case_entry("checked", where, without, passed=False)["arms"]["with"]
+    suite(tmp_path, [entry], "with-without", **suite_aggregates)
+    assert checks.run(directory, PLUGIN, judge_model="haiku") == []
+    return rerun(directory)
+
+
+def test_the_baseline_numbers_and_the_delta_are_recomputed(tmp_path: Path) -> None:
+    harness = {"score": 1.0, "passRate": 1.0, "scoreWithout": 0.0, "passRateWithout": 0.0}
+    document = two_arms(tmp_path, {**harness, "delta": 1.0}, meanDelta=1.0)
+    case = document["cases"][0]
+    aggregates = case["aggregates"]
+    without = case["arms"]["without"][0]
+    assert len(without["graders"]) == len(case["arms"]["with"][0]["graders"])
+    assert aggregates["scoreWithout"] == without["score"]
+    assert aggregates["delta"] == aggregates["score"] - aggregates["scoreWithout"]
+    assert document["aggregates"]["meanDelta"] == aggregates["delta"]
+
+
+def test_a_delta_the_harness_omitted_stays_omitted(tmp_path: Path) -> None:
+    document = two_arms(tmp_path, {"score": 1.0, "passRate": 1.0, "passRateWithout": 0.0})
+    aggregates = document["cases"][0]["aggregates"]
+    assert "scoreWithout" not in aggregates
+    assert "delta" not in aggregates
+    assert "meanDelta" not in document["aggregates"]
 
 
 def test_a_document_that_cannot_be_read_is_silent(tmp_path: Path) -> None:

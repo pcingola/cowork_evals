@@ -229,7 +229,8 @@ usage error on `--cowork`. What a two-arm suite costs in model calls is
 | a case's `aggregates`       | `score`, `passRate`, `scoreWithout`, `passRateWithout`, `delta` | `delta` is `score - scoreWithout`, and the document works it out  |
 | the document's `aggregates` | `meanDelta`                                                     | the mean of the case deltas that are defined                     |
 
-The delta is read and never re-derived. A one-arm document carries `score` and `passRate`
+The verdict reads the delta and never re-derives it. A case with checks has it recomputed by the
+check layer, [checks.md](checks.md). A one-arm document carries `score` and `passRate`
 alone, and no `arms.without`.
 
 | The grader                        | In the with-arm                   | In the without-arm                |

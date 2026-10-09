@@ -292,10 +292,10 @@ the changes, and nothing else in the document moves.
 | the case's `graders[]`      | one definition per check, `{name, type: check, weight: 1, config: {}}` |
 | the run's `graders[]`       | one result per check, in the shape every grader result has            |
 | the run's `score`, `passed` | recomputed over every scored result, the checks included              |
-| the case's `aggregates`     | `score` and `passRate` recomputed over the runs                       |
+| the case's `aggregates`     | `score` and `passRate`, and on two arms `scoreWithout`, `passRateWithout` and `delta` where the harness wrote them, recomputed over the runs |
 | the run's `judgeCostUsd`    | plus what a check judge spent                                         |
 | the document's `costUsd`    | the same, so the panel and `eval.max_cost_total_usd` both see it      |
-| the document's `aggregates` | `overallScore` and `overallPassRate` recomputed over the cases        |
+| the document's `aggregates` | `overallScore` and `overallPassRate`, and `meanDelta` where the harness wrote it, recomputed over the cases |
 
 `casesTotal` and `casesPassed` are untouched. `--threshold` is pinned to 0, so every case counts
 as passed there whatever a check said, and this package decides pass and fail. A suite with no
@@ -304,10 +304,11 @@ check anywhere leaves the document exactly as the backend wrote it.
 A `check` grader result is not judged, so a failed one fails the run exactly as a failed `regex`
 grader does, and the line reads `the check grader failed: <explanation>`.
 
-Only the `with` arm is walked. The baseline arm runs without the plugin under test, so an
-assertion about what the plugin produced has nothing to read there. A two-arm document's
-`aggregates.delta` and its `meanDelta` are the harness's own and are not recomputed. A case
-carrying `declaredUnrunnable` has no run and produces no check result.
+Every arm a case carries is walked, so both arms are scored on the same checks. A check that
+can only pass with the plugin loaded fails in the baseline arm. `scoreWithout`,
+`passRateWithout`, `delta` and `meanDelta` are recomputed only where the harness wrote them, so
+a case the harness found not comparable still carries no delta. A case carrying
+`declaredUnrunnable` has no run and produces no check result.
 
 ## What it costs
 
@@ -315,7 +316,8 @@ A check that asserts costs nothing. It is a function call on the host.
 
 A check that calls `run.judge` costs three `claude -p` calls at the judge model, per call per
 run. Each run of a case runs every check again, so a case at `runs: 3` carrying one judged check
-costs nine. The harness has already finished when a check runs, so `eval.max_cost_usd` does not
+costs nine. Under `--ablation with-without` every check runs in both arms, which doubles that
+cost. The harness has already finished when a check runs, so `eval.max_cost_usd` does not
 bind that spend; it is added to the document's `costUsd`, which `eval.max_cost_total_usd` reads.
 The ceilings are [running_evals.md](running_evals.md).
 
@@ -329,4 +331,3 @@ The ceilings are [running_evals.md](running_evals.md).
 | Imported a helper inside the function body               | `ModuleNotFoundError`. The `checks/` directory is on `sys.path` only while the files load, so import at the top                  |
 | Wrote into `run.workspace`                               | You have edited the record of what the agent produced. Write to `run.scratch`                                                   |
 | Called `run.judge` on a case at `runs: 3`                | Three judge calls per run, nine in total. Every check runs again for every run of the case                                       |
-| Expected a check to run on the `without` arm             | It does not. `--ablation with-without` runs the baseline arm with no plugin loaded, and checks run on the with-arm only          |
