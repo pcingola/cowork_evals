@@ -4,11 +4,11 @@ It reads `<plugin>/aggregate-result.json`, so one verdict covers every backend a
 decided once rather than once per plugin. The conditions are the pass and fail table in
 docs/running_evals.md.
 
-Structural graders decide the verdict. Judged graders are printed and decide nothing, because
-a judged grader over a non-deterministic agent is a flaky verdict. A skip fails the run, so a
-backend cannot go green by honouring nothing. A case that declared the backend cannot run it
-is counted instead, and the summary line says how many, because that is a fact about the case
-and not a backend honouring nothing.
+A failed grader fails the run whatever its class: structural, judged and `check` alike. A
+failed advisory check and a with-only indicator that did not fire are printed as notes and
+fail nothing. A skip fails the run, so a backend cannot go green by honouring nothing. A case
+that declared the backend cannot run it is counted instead, and the summary line says how
+many, because that is a fact about the case and not a backend honouring nothing.
 
 A document of two arms is decided on each case's delta as well. What the plugin changed is
 the with-arm score minus the without-arm score, the document works it out, and a case below
@@ -31,7 +31,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .cases import JUDGED
 from .checks import ADVISORY_TYPE
 from .config import ABLATION_WITH_WITHOUT
 from .harness import RESULT_NAME
@@ -64,7 +63,8 @@ MEAN_DELTA = "meanDelta"
 # baseline arm that ran nothing. docs/running_evals.md.
 SKIPPED_PAID = "skippedPaidGraders"
 
-# The two tags every line carries, so a judged failure is never read as the cause of exit 1.
+# The two tags every line carries, so a note is never read as the cause of exit 1. A note is a
+# failed advisory check or a with-only indicator that did not fire, and nothing else.
 FAIL = "FAIL"
 NOTE = "NOTE"
 
@@ -367,8 +367,8 @@ def _judge_grader(
     A result carries `name`, `passed` and `scored` and never `type`, so the definition is
     the only route to the class. docs/running_evals.md.
 
-    `kept` is the run's artefact suffix, on every line a person would investigate: a judged
-    note needs the transcript as much as a structural failure does. A skip and an undefined
+    `kept` is the run's artefact suffix, on every line a person would investigate: a note
+    needs the transcript as much as a failure does. A skip and an undefined
     grader do not carry one, because neither is a verdict about what the model produced.
 
     `arms` splits the `scored: false` condition. On one arm nothing is dropped from the
@@ -400,11 +400,7 @@ def _judge_grader(
     if result.get("passed"):
         return
     kind = definitions[name]
-    line = f"{at}: the {kind} grader failed: {result.get('explanation')}{kept}"
-    if kind in JUDGED:
-        notes.append(f"{NOTE} {line}")
-    else:
-        failures.append(f"{FAIL} {line}")
+    failures.append(f"{FAIL} {at}: the {kind} grader failed: {result.get('explanation')}{kept}")
 
 
 def artifacts(run: dict[str, Any]) -> str:

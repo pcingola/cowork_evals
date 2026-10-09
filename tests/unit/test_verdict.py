@@ -106,7 +106,7 @@ def test_an_empty_document_passes(tmp_path: Path) -> None:
     )
 
 
-# Structural graders decide the verdict.
+# Every grader decides the verdict.
 
 
 def test_every_structural_grader_failure_is_a_failure(tmp_path: Path) -> None:
@@ -123,17 +123,15 @@ def test_every_structural_grader_failure_is_a_failure(tmp_path: Path) -> None:
     ]
 
 
-# Judged graders are printed only.
-
-
-def test_a_judged_grader_failure_is_printed_and_gates_nothing(tmp_path: Path) -> None:
+def test_every_judged_grader_failure_is_a_failure(tmp_path: Path) -> None:
     result = judge(run_directory(tmp_path, smoke="judged_failure"))
-    assert result.passed
-    assert notes(result) == [
-        "NOTE smoke/judged: run 1: reads-well: the llm grader failed: 1 of 3 votes",
-        "NOTE smoke/judged: run 1: beats-baseline: the baseline grader failed: "
+    assert not result.passed
+    assert failures(result) == [
+        "FAIL smoke/judged: run 1: reads-well: the llm grader failed: 1 of 3 votes",
+        "FAIL smoke/judged: run 1: beats-baseline: the baseline grader failed: "
         "the baseline read better",
     ]
+    assert notes(result) == []
 
 
 def test_a_grader_result_is_joined_to_its_definition_by_name(tmp_path: Path) -> None:
@@ -271,13 +269,12 @@ def test_a_structural_failure_names_the_run_artefacts(tmp_path: Path, working_di
     )
 
 
-def test_a_judged_note_names_them_too(tmp_path: Path, working_directory) -> None:
-    """A judged grader decides nothing and still has to be investigated."""
+def test_a_judged_failure_names_them_too(tmp_path: Path, working_directory) -> None:
     root = run_directory(tmp_path, smoke="judged_failure")
     with_trace(root / "smoke", collected(root / "smoke", "judged"))
     with working_directory(tmp_path):
         result = judge(root)
-    assert notes(result)[0].endswith("[artifacts: smoke/traces/judged/run-1]")
+    assert failures(result)[0].endswith("[artifacts: smoke/traces/judged/run-1]")
 
 
 def test_an_errored_run_names_them(tmp_path: Path, working_directory) -> None:
@@ -494,11 +491,11 @@ def test_a_declared_case_is_recorded_as_declared(tmp_path: Path) -> None:
     assert failures(result) == []
 
 
-def test_a_judged_failure_alone_is_still_a_pass(tmp_path: Path) -> None:
-    """Judged graders decide nothing, so the outcome agrees with the exit code."""
+def test_a_judged_failure_alone_is_a_fail(tmp_path: Path) -> None:
+    """The outcome agrees with the exit code, and nothing is counted as passed."""
     result = judge(run_directory(tmp_path, smoke="judged_failure"))
-    assert outcomes(result) == [("judged", "pass")]
-    assert notes(result)
+    assert outcomes(result) == [("judged", "fail")]
+    assert result.lines[-1].startswith("1 found, 1 picked, 1 ran, 0 passed, ")
 
 
 def test_a_two_arm_document_records_one_outcome_per_case(tmp_path: Path) -> None:

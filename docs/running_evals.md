@@ -13,7 +13,7 @@ conditions that fail an invocation, and what a suite may cost.
 - **Flags are pinned, not defaulted.** Every flag in the pinned list has a harness default
   this repository cannot accept.
 - **This package decides pass and fail, not the harness.** It reads the result document, so one
-  verdict covers both backends. Structural graders decide; judged graders are printed.
+  verdict covers both backends. Every grader decides, structural and judged alike.
 - **A skip fails the run**, so a backend cannot go green by honouring nothing. A case the
   backend was told it cannot run is counted instead.
 - **Every invocation keeps everything it printed**, with every run's transcript in it.
@@ -389,7 +389,7 @@ whole invocation, so a sweep is decided once and not once per plugin.
 
 | Condition                                                            | Result       |
 | -------------------------------------------------------------------- | ------------ |
-| Any `regex`, `tool_used`, `tool_order`, `file_exists` or `check` grader failed | exit 1 |
+| Any `regex`, `tool_used`, `tool_order`, `file_exists`, `llm`, `baseline` or `check` grader failed | exit 1 |
 | Any case or grader reported skipped                                  | exit 1       |
 | A grader reported `scored: false`, on one arm                        | exit 1       |
 | A grader reported `scored: false`, on two arms                       | printed only, when it did not fire |
@@ -403,7 +403,6 @@ whole invocation, so a sweep is decided once and not once per plugin.
 | A sweep stopped by `eval.max_cost_total_usd`                         | exit 1       |
 | A results document is missing, unparsable, or of another `schemaVersion` | exit 1   |
 | A grader result naming no grader the case defines                    | exit 1       |
-| Any `llm` or `baseline` grader failed                                | printed only |
 | A document whose `aggregates.casesTotal` is 0                        | exit 0       |
 | Otherwise                                                            | exit 0       |
 
@@ -412,15 +411,16 @@ A skill that reads an environment variable outside `docker.session_env`,
 CoWork session, and its case fails in Docker. See [docker.md](docker.md), "The session
 environment".
 
-Structural graders decide because a judged grader over a non-deterministic agent is a flaky
-verdict. A `check` grader is this package's own, not the harness's, and it decides for the same
-reason: it is an author's Python over what the run produced, deterministic unless the author
-made it otherwise. The verdict needs no condition for it. See [checks.md](checks.md).
+Every grader decides: the four structural ones, the two judged ones, and `check`. A judged
+grader is a majority of `eval.judge_votes` votes, and that majority is its result. A `check`
+grader is this package's own, not the harness's, and the verdict needs no condition for it.
+See [checks.md](checks.md).
 
-Every line printed carries `FAIL` or `NOTE`, so a judged failure is never read as the cause of
-exit 1. A run's grader results carry `name`, `passed` and `scored`, never `type`, so the
-verdict joins each result to that case's grader definition by name to learn which class it is
-in. It reads `schemaVersion: 1` documents and tolerates unknown fields; the contract is
+Every line printed carries `FAIL` or `NOTE`, so a note is never read as the cause of exit 1. A
+note is a failed advisory check or a with-only indicator that did not fire. A run's grader
+results carry `name`, `passed` and `scored`, never `type`, so the verdict joins each result to
+that case's grader definition by name to learn its type, which tells an advisory check from
+every other grader and which the line names. It reads `schemaVersion: 1` documents and tolerates unknown fields; the contract is
 additive-only.
 
 `scored: false` splits on the arm. Too strict and every two-arm run is red; too loose and a
@@ -545,10 +545,10 @@ arm, and a number that is always 0 there would read as a plugin that changed not
 document marked `partial` adds `stopped early` and the reason to the end of the line.
 
 A line about what one run produced ends with `[artifacts: <dir>]`, naming the directory holding
-that run's transcript. It is on a failed structural grader, a failed judged grader and an
-errored run, which are the three lines somebody goes and reads a transcript over. A skipped
-case, a skipped grader and a grader naming no definition carry none: none of them is a verdict
-about what the model produced, and there is no transcript behind them.
+that run's transcript. It is on a failed grader, a note and an errored run, which are the
+three lines somebody goes and reads a transcript over. A skipped case, a skipped grader and a
+grader naming no definition carry none: none of them is a verdict about what the model
+produced, and there is no transcript behind them.
 
 The directory comes from the run's `tracePath` and is printed only when it is on disk, so a run
 whose trace was not collected carries no suffix. `traces.py` rewrites that field to the trace it
@@ -618,7 +618,7 @@ A consumer automates it when all four of these hold, and not before:
 | Condition                                                             | Read from                                                                |
 | ---------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | Every skill under test has at least one case                          | the `evals/` tree, reported by `run` and enforced by `--require-coverage` |
-| Structural graders carry the verdict, with a measured flake rate      | `logs/evals/*/`                                                          |
+| The graders carry the verdict, with a measured flake rate             | `logs/evals/*/`                                                          |
 | The cost and wall-clock time of a full sweep are measured and accepted | the cost section below                                                   |
 | A credential and a pinned CLI on a runner have an owner               | a decision                                                               |
 

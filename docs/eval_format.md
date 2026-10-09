@@ -157,7 +157,8 @@ One grader per file under `graders/`, frontmatter then the rubric or pattern.
 | `llm`         | `criteria`, `focus`. A judge model votes 2 of 3                  | judged     |
 | `baseline`    | `baseline_file`, `criteria`                                      | judged     |
 
-The class column is what the verdict reads. See [running_evals.md](running_evals.md).
+The class column says how a grader is graded. A failure of either class fails the run. See
+[running_evals.md](running_evals.md).
 
 Every grader also takes `name`, which defaults to the filename without `.md`, and `weight`,
 which is greater than 0 and defaults to 1. The verdict reads pass and fail, not the score, so

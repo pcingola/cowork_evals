@@ -23,7 +23,8 @@ about each.
 
 A case asserts what a unit test cannot reach: the answer text, which tools ran and in what
 order, which files the agent created, and a rubric a judge model votes on. The four structural
-graders are deterministic and carry the verdict. The two judged ones are printed. The third
+graders are deterministic, the two judged ones ask a model, and a failure of either fails the
+run. The third
 kind of assertion is a check: an author's own Python in the case's `checks/` directory, run on
 the host over what the run produced, which is how a case says what is inside the file rather
 than only that it appeared. See [`docs/checks.md`](docs/checks.md).
@@ -175,7 +176,7 @@ match: not_contains
 ---
 ```
 
-Both are structural, so both decide the exit code. A grader file without the `---` delimiters
+Either one failing fails the run. A grader file without the `---` delimiters
 is read as a note and is silently ignored.
 
 A grader can say that the agent created `totals.xlsx`. No grader type can say what is inside
@@ -215,7 +216,7 @@ The exit code is the verdict's:
 | Exit | Means                                                            |
 | ---- | ---------------------------------------------------------------- |
 | 0    | the run passed                                                  |
-| 1    | a structural grader failed, a case or grader was skipped, a run never had a tool it was granted, or a case's delta was below the threshold |
+| 1    | a grader or a check failed, a case or grader was skipped, a run never had a tool it was granted, or a case's delta was below the threshold |
 | 2    | usage error                                                      |
 | 3    | the preflight failed. Nothing ran, and the message names the fix |
 

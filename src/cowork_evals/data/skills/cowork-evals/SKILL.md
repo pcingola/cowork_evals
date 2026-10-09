@@ -127,8 +127,8 @@ not one.
 ## Graders
 
 One grader per file under `graders/`, frontmatter then the rubric or pattern. Structural
-graders are deterministic and decide the exit code. Judged graders call a model and are
-printed. Prefer a structural one.
+graders are deterministic. Judged graders call a model. Both decide the exit code. Prefer a
+structural one.
 
 | Type          | Takes                                                                     | Class      |
 | ------------- | ------------------------------------------------------------------------- | ---------- |
@@ -247,7 +247,7 @@ Each has a silent failure mode.
 | Exit | Means                                                            |
 | ---- | ---------------------------------------------------------------- |
 | 0    | the run passed                                                  |
-| 1    | a structural grader or a check failed, a case or grader was skipped, a run never had a tool it was granted, or a case's delta was below the threshold |
+| 1    | a grader or a check failed, a case or grader was skipped, a run never had a tool it was granted, or a case's delta was below the threshold |
 | 2    | usage error                                                      |
 | 3    | the preflight failed. Nothing ran, and the message names the fix |
 

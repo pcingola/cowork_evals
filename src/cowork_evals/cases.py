@@ -45,9 +45,9 @@ PRUNED = frozenset({"node_modules", ".git", ".claude", "results"})
 # A grader's default weight. docs/eval_format.md.
 DEFAULT_WEIGHT = 1
 
-# Every grader type the format defines, split into the two classes the verdict reads: a
-# structural grader is deterministic and decides, and a judged grader calls a model and is
-# printed. docs/eval_format.md, docs/running_evals.md.
+# Every grader type the format defines, split by how it is graded: a structural grader is
+# evaluated over the run's document, and a judged grader asks a model. Both decide the
+# verdict. docs/eval_format.md, docs/running_evals.md.
 STRUCTURAL = ("regex", "tool_used", "tool_order", "file_exists")
 JUDGED = ("llm", "baseline")
 GRADER_TYPES = frozenset(STRUCTURAL + JUDGED)

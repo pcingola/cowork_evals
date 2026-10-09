@@ -301,8 +301,8 @@ the changes, and nothing else in the document moves.
 as passed there whatever a check said, and this package decides pass and fail. A suite with no
 check anywhere leaves the document exactly as the backend wrote it.
 
-A `check` grader result is not judged, so a failed one fails the run exactly as a failed `regex`
-grader does, and the line reads `the check grader failed: <explanation>`.
+A failed `check` grader result fails the run exactly as a failed `regex` grader does, and the
+line reads `the check grader failed: <explanation>`.
 
 Every arm a case carries is walked, so both arms are scored on the same checks. A check that
 can only pass with the plugin loaded fails in the baseline arm. `scoreWithout`,

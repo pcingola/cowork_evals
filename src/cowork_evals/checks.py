@@ -9,9 +9,10 @@ assertion about the contents of a file the run produced. A `file_exists` grader 
 A check is that assertion, written as a Python function under the case's `checks/` directory.
 This module discovers those functions, runs each of them once per run over the files that run
 left on the host, and appends each verdict to the same `aggregate-result.json` the graders
-wrote into, as a grader result of type `check`. `verdict.py` needs no rule for it: it asks
-whether a grader type is judged, `check` is not, so a failed check fails the run exactly as a
-failed `regex` grader does.
+wrote into, as a grader result of type `check`. `verdict.py` needs no rule for it: a failed
+grader fails the run whatever its type, so a failed check fails the run exactly as a failed
+`regex` grader does. An advisory check is the one exception, and `verdict.py` reads it by its
+type.
 
 A check runs on the host, in this package's process, after the run is graded and after
 `traces.collect` has put the run's files under the run directory. It never enters the container
@@ -50,8 +51,8 @@ from .results import ARM_WITH, ARM_WITHOUT, ARMS, DECLARED_UNRUNNABLE
 from .traces import LAST_MESSAGE_NAME, TRACE_NAME, WORKSPACE_NAME
 
 # The attribute `@check` writes, and the grader type a check result carries in the document.
-# `check` is not in `cases.JUDGED`, so `verdict._judge_grader` decides a failed one the way it
-# decides a failed structural grader, with no new condition anywhere. docs/checks.md.
+# `verdict._judge_grader` decides a failed check the way it decides any failed grader, with no
+# new condition anywhere. docs/checks.md.
 # The attribute is there when the function is a check, and it holds whether it is advisory.
 MARKER = "__cowork_evals_check__"
 CHECK_TYPE = "check"

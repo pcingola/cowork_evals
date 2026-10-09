@@ -113,8 +113,8 @@ can look complete and have no test and no eval at all. Check the paths, do not i
   where the skill fires and a case where it must not.
 - **F3.** A case is a directory: `prompt.md` with frontmatter, and one file per grader under
   `graders/`. A grader file missing its `---` delimiters is read as a note and silently ignored.
-- **F4.** The pass or fail rests on structural graders. A judged grader is printed and does not
-  decide the exit code.
+- **F4.** Every grader decides the exit code, a judged one included. A judged grader is a
+  model's vote, so the case rests on structural graders wherever one can say it.
 
 `cowork_evals run --docker <plugin>/evals/<skill>` runs the cases, and the `cowork-evals` skill
 holds the case format. Where the description declares a negative trigger (A5), F2's non-firing
