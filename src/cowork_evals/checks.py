@@ -650,7 +650,7 @@ def _recount(document: dict[str, Any]) -> None:
         # The harness writes it only for a two-arm document whose arms are comparable.
         return
     deltas = [(case.get("aggregates") or {}).get("delta") for case in counted]
-    defined = [one for one in deltas if isinstance(one, int | float)]
+    defined = [one for one in deltas if isinstance(one, int | float) and not isinstance(one, bool)]
     if defined:
         aggregates["meanDelta"] = sum(defined) / len(defined)
 
@@ -670,17 +670,17 @@ def _each_case(
 
     spent = 0.0
     arms = case.get("arms") or {}
-    checked: dict[str, list[dict[str, Any]]] = {}
+    walked: dict[str, list[dict[str, Any]]] = {}
     for name in ARMS:
         runs = [entry for entry in arms.get(name) or [] if isinstance(entry, dict)]
         for index, entry in enumerate(runs, start=1):
             spent += _each_run(entry, checks, case_dir, index, judge_model, warnings)
         if runs:
-            checked[name] = runs
+            walked[name] = runs
 
     aggregates = dict(case.get("aggregates") or {})
-    with_runs = checked.get(ARM_WITH)
-    without_runs = checked.get(ARM_WITHOUT)
+    with_runs = walked.get(ARM_WITH)
+    without_runs = walked.get(ARM_WITHOUT)
     if with_runs:
         aggregates["score"] = sum(score(entry) for entry in with_runs) / len(with_runs)
         aggregates["passRate"] = sum(1 for entry in with_runs if entry.get("passed")) / len(
