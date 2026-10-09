@@ -11,8 +11,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cowork_evals import traces
+from cowork_evals import results, traces
 from cowork_evals.harness import RESULT_NAME
+from cowork_evals.results import (
+    Arms,
+    CaseAggregates,
+    CaseEntry,
+    CoWorkRef,
+    ResultDocument,
+    RunEntry,
+    SuiteAggregates,
+    SuiteInfo,
+)
 
 SANDBOX = "claude-eval-Ab12Cd"
 
@@ -100,54 +110,95 @@ def write_session(root: Path, name: str = "s-0001", *, outputs: bool = True) -> 
     return session
 
 
-def session_entry(session: Path, *, passed: bool = True, error: str | None = None) -> dict:
+def bare_run(
+    passed: bool,
+    *,
+    trace_path: str | None = None,
+    error: str | None = None,
+    cowork: CoWorkRef | None = None,
+) -> RunEntry:
+    """One run of the document, with nothing graded."""
+    return RunEntry(
+        score=1.0 if passed else 0.0,
+        passed=passed,
+        turns=0,
+        cost_usd=0.0,
+        judge_cost_usd=0.0,
+        error=error,
+        skipped_paid_graders=False,
+        graders=[],
+        trace_path=trace_path,
+        cowork=cowork,
+    )
+
+
+def session_entry(session: Path, *, passed: bool = True, error: str | None = None) -> RunEntry:
     """One CoWork run of the document, as results.py writes it."""
-    return {
-        "passed": passed,
-        "error": error,
-        "tracePath": str(session / ".claude" / "projects" / "session" / "t-0001.jsonl"),
-        "cowork": {"sessionDir": str(session), "timeoutSeconds": 1800.0},
-    }
+    return bare_run(
+        passed,
+        error=error,
+        trace_path=str(session / ".claude" / "projects" / "session" / "t-0001.jsonl"),
+        cowork=CoWorkRef(session_dir=str(session), timeout_seconds=1800.0),
+    )
 
 
-def write_document(output_dir: Path, *runs: dict) -> Path:
+def write_document(output_dir: Path, *runs: RunEntry) -> Path:
     """A result document naming one case whose runs are the ones given."""
     return write_cases(output_dir, ("python-version", list(runs)))
 
 
-def write_cases(output_dir: Path, *cases: tuple[str, list[dict]]) -> Path:
+def case_entry(name: str, runs: list[RunEntry], without: list[RunEntry] | None = None) -> CaseEntry:
+    return CaseEntry(
+        name=name,
+        dir=name,
+        source="",
+        prompt_markdown="",
+        graders=[],
+        arms=Arms(with_=runs, without=without),
+        aggregates=CaseAggregates(score=0.0, pass_rate=0.0),
+    )
+
+
+def write_entries(output_dir: Path, cases: list[CaseEntry]) -> Path:
+    """A result document over the given cases."""
+    document = ResultDocument(
+        schema_version=1,
+        claude_version="",
+        started_at="",
+        duration_seconds=0.0,
+        cost_usd=0.0,
+        suite=SuiteInfo(root="", ablation="none", threshold=0, judge_model="", plugins=[]),
+        cases=cases,
+        aggregates=SuiteAggregates(
+            cases_total=len(cases), cases_passed=0, overall_score=0.0, overall_pass_rate=0.0
+        ),
+    )
+    return results.write(output_dir, document)
+
+
+def write_cases(output_dir: Path, *cases: tuple[str, list[RunEntry]]) -> Path:
     """A result document of several cases, each with its own runs."""
-    document = {
-        "schemaVersion": 1,
-        "cases": [{"name": name, "arms": {"with": runs}} for name, runs in cases],
-    }
-    path = output_dir / RESULT_NAME
-    path.write_text(json.dumps(document), encoding="utf-8")
-    return path
+    return write_entries(output_dir, [case_entry(name, runs) for name, runs in cases])
 
 
-def run_entry(passed: bool, name: str = SANDBOX) -> dict:
+def run_entry(passed: bool, name: str = SANDBOX) -> RunEntry:
     """One run of the document, with the container-side `tracePath` the harness writes."""
-    return {
-        "passed": passed,
-        "tracePath": f"/work/logs/{traces.SANDBOX_DIR}/{name}/"
+    return bare_run(
+        passed,
+        trace_path=f"/work/logs/{traces.SANDBOX_DIR}/{name}/"
         f"{traces.SANDBOX_OUT}/{traces.SANDBOX_TRACE}",
-    }
+    )
 
 
-def write_two_arm(output_dir: Path, name: str, *, with_runs: list[dict], without: list[dict]):
+def write_two_arm(
+    output_dir: Path, name: str, *, with_runs: list[RunEntry], without: list[RunEntry]
+) -> Path:
     """A two-arm document, as `--ablation with-without` writes one. Both arms carry runs."""
-    document = {
-        "schemaVersion": 1,
-        "cases": [{"name": name, "arms": {"with": with_runs, "without": without}}],
-    }
-    path = output_dir / RESULT_NAME
-    path.write_text(json.dumps(document), encoding="utf-8")
-    return path
+    return write_entries(output_dir, [case_entry(name, with_runs, without)])
 
 
-def collected(output_dir: Path) -> dict:
-    return json.loads((output_dir / RESULT_NAME).read_text(encoding="utf-8"))
+def collected(output_dir: Path) -> ResultDocument:
+    return ResultDocument.read(output_dir / RESULT_NAME)
 
 
 # Naming.
@@ -234,11 +285,11 @@ def test_each_arm_gets_its_own_trace_path(tmp_path: Path) -> None:
     )
     traces.collect(tmp_path)
 
-    arms = collected(tmp_path)["cases"][0]["arms"]
-    assert Path(arms["with"][0]["tracePath"]) == (
+    arms = collected(tmp_path).cases[0].arms
+    assert Path(arms.with_[0].trace_path) == (
         traces.run_dir(tmp_path, "python-version", 1) / traces.TRACE_NAME
     )
-    assert Path(arms["without"][0]["tracePath"]) == (
+    assert Path(arms.without[0].trace_path) == (
         traces.run_dir(tmp_path, "python-version", 1, arm="without") / traces.TRACE_NAME
     )
 
@@ -349,7 +400,7 @@ def test_the_trace_path_is_rewritten_to_where_the_trace_now_is(tmp_path: Path) -
     write_document(tmp_path, run_entry(passed=False))
 
     traces.collect(tmp_path)
-    written = collected(tmp_path)["cases"][0]["arms"]["with"][0]["tracePath"]
+    written = collected(tmp_path).cases[0].arms.with_[0].trace_path
     assert Path(written) == traces.run_dir(tmp_path, "python-version", 1) / traces.TRACE_NAME
     assert Path(written).is_file()
 
@@ -371,7 +422,7 @@ def test_a_missing_result_document_is_a_warning_and_the_sandboxes_still_go(
 
 def test_a_run_naming_no_sandbox_is_a_warning(tmp_path: Path) -> None:
     traces.sandbox_root(tmp_path).mkdir(parents=True)
-    write_document(tmp_path, {"passed": False, "tracePath": "a-correlation-id"})
+    write_document(tmp_path, bare_run(False, trace_path="a-correlation-id"))
 
     warnings = traces.collect(tmp_path)
     assert warnings == [
@@ -457,11 +508,11 @@ def test_a_cowork_trace_path_is_rewritten_like_a_harness_one(tmp_path: Path) -> 
     write_document(output, session_entry(session))
 
     traces.collect(output)
-    written = collected(output)["cases"][0]["arms"]["with"][0]["tracePath"]
+    written = collected(output).cases[0].arms.with_[0].trace_path
     assert Path(written) == traces.run_dir(output, "python-version", 1) / traces.TRACE_NAME
-    assert collected(output)["cases"][0]["arms"]["with"][0]["cowork"]["sessionDir"] == str(
-        session
-    ), "the session directory is still named"
+    assert collected(output).cases[0].arms.with_[0].cowork.session_dir == str(session), (
+        "the session directory is still named"
+    )
 
 
 def test_a_run_that_reached_no_session_and_carries_an_error_says_nothing(tmp_path: Path) -> None:
@@ -470,11 +521,11 @@ def test_a_run_that_reached_no_session_and_carries_an_error_says_nothing(tmp_pat
     output.mkdir()
     write_document(
         output,
-        {
-            "passed": False,
-            "error": "5: no session directory appeared",
-            "cowork": {"sessionDir": None, "timeoutSeconds": 1800.0},
-        },
+        bare_run(
+            False,
+            error="5: no session directory appeared",
+            cowork=CoWorkRef(session_dir=None, timeout_seconds=1800.0),
+        ),
     )
     assert traces.collect(output) == []
 
@@ -482,7 +533,7 @@ def test_a_run_that_reached_no_session_and_carries_an_error_says_nothing(tmp_pat
 def test_a_run_that_reached_no_session_and_carries_no_error_warns(tmp_path: Path) -> None:
     output = tmp_path / "logs"
     output.mkdir()
-    write_document(output, {"passed": True, "cowork": {"sessionDir": None}})
+    write_document(output, bare_run(True, cowork=CoWorkRef(timeout_seconds=1800.0)))
 
     assert traces.collect(output) == ["python-version: run 1: the run reached no session directory"]
 
@@ -495,7 +546,7 @@ def test_the_cowork_key_and_not_its_value_decides_the_backend(tmp_path: Path) ->
     """
     output = tmp_path / "logs"
     output.mkdir()
-    write_document(output, {"passed": True, "cowork": {"sessionDir": None}})
+    write_document(output, bare_run(True, cowork=CoWorkRef(timeout_seconds=1800.0)))
     assert "sandbox" not in traces.collect(output)[0]
 
 
@@ -533,7 +584,7 @@ def denial(tool: str, reason: str = "mode") -> dict:
     }
 
 
-def validity_run(tmp_path: Path, records: list[dict], granted: tuple[str, ...] = GRANT) -> dict:
+def validity_run(tmp_path: Path, records: list[dict], granted: tuple[str, ...] = GRANT) -> RunEntry:
     """Collect one harness run over the given trace, and return its entry in the document."""
     output = tmp_path / "logs"
     output.mkdir()
@@ -541,40 +592,40 @@ def validity_run(tmp_path: Path, records: list[dict], granted: tuple[str, ...] =
     write_document(output, run_entry(True))
 
     assert traces.collect(output, granted=granted) == []
-    return collected(output)["cases"][0]["arms"]["with"][0]
+    return collected(output).cases[0].arms.with_[0]
 
 
 def test_a_mode_denial_yields_the_tool_it_named(tmp_path: Path) -> None:
     """A session has no permission mode, so a mode denial is the container being unlike one."""
     entry = validity_run(tmp_path, [init(), denial("Write"), *TRACE[1:]])
-    assert entry[traces.DENIED] == ["Write"]
+    assert entry.denied_tools == ["Write"]
 
 
 def test_two_mode_denials_yield_both_tools_once_each(tmp_path: Path) -> None:
     records = [init(), denial("Write"), denial("Edit"), denial("Write"), *TRACE[1:]]
-    assert validity_run(tmp_path, records)[traces.DENIED] == ["Write", "Edit"]
+    assert validity_run(tmp_path, records).denied_tools == ["Write", "Edit"]
 
 
 def test_a_hook_denial_yields_nothing(tmp_path: Path) -> None:
     """A hook denial is the plugin's own behaviour, which a case testing a hook asserts over."""
     entry = validity_run(tmp_path, [init(), denial("Write", "hook"), *TRACE[1:]])
-    assert traces.DENIED not in entry
+    assert entry.denied_tools is None
 
 
 def test_the_denial_reason_and_never_the_tool_name_decides(tmp_path: Path) -> None:
     """A tool no grader names still broke the run, so the rule cannot narrow to named tools."""
     records = [init(), denial("mcp__plugin_acme_jira__create_issue"), *TRACE[1:]]
-    assert validity_run(tmp_path, records)[traces.DENIED] == ["mcp__plugin_acme_jira__create_issue"]
+    assert validity_run(tmp_path, records).denied_tools == ["mcp__plugin_acme_jira__create_issue"]
 
 
 def test_a_granted_tool_missing_from_the_offered_list_is_named(tmp_path: Path) -> None:
     offered = [tool for tool in OFFERED if tool != "Bash"]
     entry = validity_run(tmp_path, [init(offered), *TRACE[1:]])
-    assert entry[traces.UNOFFERED] == ["Bash"]
+    assert entry.unoffered_tools == ["Bash"]
 
 
 def test_an_offered_list_carrying_every_granted_tool_yields_nothing(tmp_path: Path) -> None:
-    assert traces.UNOFFERED not in validity_run(tmp_path, [init(), *TRACE[1:]])
+    assert validity_run(tmp_path, [init(), *TRACE[1:]]).unoffered_tools is None
 
 
 def test_a_grant_and_an_offer_are_compared_before_the_bracket(tmp_path: Path) -> None:
@@ -582,24 +633,24 @@ def test_a_grant_and_an_offer_are_compared_before_the_bracket(tmp_path: Path) ->
     offered = ["WebFetch", "Read(//home/**)", "Skill"]
     granted = ("WebFetch(domain:example.com)", "Read", "Skill")
     entry = validity_run(tmp_path, [init(offered), *TRACE[1:]], granted)
-    assert traces.UNOFFERED not in entry
+    assert entry.unoffered_tools is None
 
 
 def test_a_trace_with_no_init_record_yields_nothing(tmp_path: Path) -> None:
     """A run that wrote no tool list says nothing about what it had."""
     entry = validity_run(tmp_path, [record for record in TRACE if record["type"] != "system"])
-    assert traces.UNOFFERED not in entry
+    assert entry.unoffered_tools is None
 
 
 def test_an_empty_grant_names_nothing(tmp_path: Path) -> None:
     """The CoWork backend passes none, and nothing to compare is not a failure."""
-    assert traces.UNOFFERED not in validity_run(tmp_path, [init(), *TRACE[1:]], ())
+    assert validity_run(tmp_path, [init(), *TRACE[1:]], ()).unoffered_tools is None
 
 
 def test_a_healthy_run_carries_neither_field(tmp_path: Path) -> None:
     entry = validity_run(tmp_path, [init(), *TRACE[1:]])
-    assert traces.DENIED not in entry
-    assert traces.UNOFFERED not in entry
+    assert entry.denied_tools is None
+    assert entry.unoffered_tools is None
 
 
 def test_a_cowork_run_carries_neither_field(tmp_path: Path) -> None:
@@ -610,9 +661,9 @@ def test_a_cowork_run_carries_neither_field(tmp_path: Path) -> None:
     write_document(output, session_entry(session))
 
     assert traces.collect(output, granted=GRANT) == []
-    entry = collected(output)["cases"][0]["arms"]["with"][0]
-    assert traces.DENIED not in entry
-    assert traces.UNOFFERED not in entry
+    entry = collected(output).cases[0].arms.with_[0]
+    assert entry.denied_tools is None
+    assert entry.unoffered_tools is None
 
 
 def test_the_final_message_is_still_written_beside_the_checks(tmp_path: Path) -> None:
