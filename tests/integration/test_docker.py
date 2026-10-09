@@ -25,6 +25,7 @@ from cowork_evals.docker import CONTAINER_KEEP_FILE, KEEP_FILE, Condition, Docke
 from cowork_evals.docker.parity import EXPECTED_VERSIONS, REQUIREMENTS, compare
 from cowork_evals.harness import RunOptions
 from cowork_evals.requirements import pins
+from cowork_evals.results import ResultDocument
 
 ROOT = Path(__file__).resolve().parents[2]
 SMOKE = ROOT / "plugins" / "smoke"
@@ -376,7 +377,7 @@ def test_a_two_arm_run_is_collected_and_decided_on_its_delta(credentialled, tmp_
 
     document = json.loads(result.read_text())
     assert document["suite"]["ablation"] == "with-without"
-    assert verdict.two_arm(document)
+    assert verdict.two_arm(ResultDocument.read(result))
     for case in document["cases"]:
         assert case["arms"]["without"], f"{case['name']} ran no baseline arm"
         assert isinstance(case["aggregates"]["delta"], int | float), case["aggregates"]

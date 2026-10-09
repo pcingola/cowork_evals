@@ -363,6 +363,11 @@ class SuiteAggregates(_Entry):
     mean_delta: float | None = Field(default=None, alias="meanDelta")
 
 
+class WrongSchema(ValueError):
+    """A document of another `schemaVersion`. It is raised before any field is validated, so a
+    reader can report the version rather than a field the other schema does not have."""
+
+
 class ResultDocument(_Entry):
     """The whole document.
 
@@ -387,7 +392,7 @@ class ResultDocument(_Entry):
         if isinstance(data, dict):
             version = data.get("schemaVersion", data.get("schema_version"))
             if version != SCHEMA_VERSION:
-                raise ValueError(
+                raise WrongSchema(
                     f"schemaVersion is {version!r}, and this module reads {SCHEMA_VERSION}"
                 )
         return data
