@@ -137,7 +137,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 `tests/unit/test_preflight.py` and `tests/integration/test_cli.py` precedes
 `tests/integration/test_docker.py`. The "Decisions" table overrides any row it contradicts.
 
-- [ ] [`tests/conftest.py`](plan_tests/conftest.md), and the new `tests/unit/conftest.py` with the shared helpers that file's rows propose.
+- [x] [`tests/conftest.py`](plan_tests/conftest.md), and the new `tests/unit/conftest.py` with the shared helpers that file's rows propose.
 - [ ] [`tests/integration/conftest.py`](plan_tests/integration_conftest.md), with `Config.dump` users and the `images` fixture.
 - [ ] [`tests/data/`](plan_tests/data.md): add every proposed fixture and fix every `FIX` fixture. Deletion of unread fixtures is the last box of this phase.
 - [ ] [`tests/unit/test_cases.py`](plan_tests/unit_test_cases.md)

@@ -5,21 +5,10 @@ Nothing in this file runs the harness. The argument list is the unit under test.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from cowork_evals.config import Config, EvalSection
 from cowork_evals.harness import RunOptions, eval_argv
-
-
-def options(**overrides) -> RunOptions:
-    """A fully explicit RunOptions, so a test reads no configuration it did not write."""
-    fixed = {
-        "model": "sonnet",
-        "judge_model": "haiku",
-        "ablation": "none",
-        "max_cost_usd": "5",
-        "allow_tools": ("Bash",),
-        "keep_traces": True,
-    }
-    return RunOptions(**{**fixed, **overrides})
 
 
 def value_after(argv: list[str], flag: str) -> str:
@@ -83,21 +72,21 @@ def test_a_whole_cost_is_emitted_without_a_decimal_point():
 # The command line.
 
 
-def test_the_target_comes_before_every_variadic_flag():
-    argv = eval_argv("/work/plugin/evals", "/work/logs", options(tags=("skill",)))
+def test_the_target_comes_before_every_variadic_flag(run_options: RunOptions):
+    argv = eval_argv("/work/plugin/evals", "/work/logs", replace(run_options, tags=("skill",)))
     target = argv.index("/work/plugin/evals")
     assert target < argv.index("--allow-tools")
     assert target < argv.index("--tag")
 
 
-def test_the_debug_file_goes_before_the_subcommand():
-    argv = eval_argv("/work/plugin/evals", "/work/logs", options())
+def test_the_debug_file_goes_before_the_subcommand(run_options: RunOptions):
+    argv = eval_argv("/work/plugin/evals", "/work/logs", run_options)
     assert argv[:5] == ["claude", "--debug-file", "/work/logs/debug.txt", "plugin", "eval"]
     assert "--debug" not in argv, "a bare --debug swallows the subcommand name as its filter"
 
 
-def test_every_always_pinned_flag_is_emitted():
-    argv = eval_argv("/work/plugin/evals", "/work/logs", options())
+def test_every_always_pinned_flag_is_emitted(run_options: RunOptions):
+    argv = eval_argv("/work/plugin/evals", "/work/logs", run_options)
     assert value_after(argv, "--model") == "sonnet"
     assert value_after(argv, "--judge-model") == "haiku"
     assert value_after(argv, "--ablation") == "none"
@@ -109,19 +98,21 @@ def test_every_always_pinned_flag_is_emitted():
         assert flag in argv
 
 
-def test_json_is_never_emitted():
-    assert "--json" not in eval_argv("/work/plugin/evals", "/work/logs", options())
+def test_json_is_never_emitted(run_options: RunOptions):
+    assert "--json" not in eval_argv("/work/plugin/evals", "/work/logs", run_options)
 
 
-def test_the_threshold_cannot_be_overridden():
+def test_the_threshold_cannot_be_overridden(run_options: RunOptions):
     """It is not a field of RunOptions, so no caller can reach it. It is what hands pass and
     fail to verdict.py, and the number a two-arm run is decided on lives there."""
-    assert not hasattr(options(), "threshold")
-    assert "--threshold" in eval_argv("/work/plugin/evals", "/work/logs", options())
+    assert not hasattr(run_options, "threshold")
+    assert "--threshold" in eval_argv("/work/plugin/evals", "/work/logs", run_options)
 
 
-def test_the_ablation_is_the_resolved_option():
-    argv = eval_argv("/work/plugin/evals", "/work/logs", options(ablation="with-without"))
+def test_the_ablation_is_the_resolved_option(run_options: RunOptions):
+    argv = eval_argv(
+        "/work/plugin/evals", "/work/logs", replace(run_options, ablation="with-without")
+    )
     assert value_after(argv, "--ablation") == "with-without"
 
 
@@ -132,33 +123,35 @@ def test_the_ablation_is_off_unless_the_file_or_the_argument_turns_it_on():
     assert RunOptions.resolve(configured, ablation="none").ablation == "none"
 
 
-def test_nothing_unasked_is_emitted():
-    argv = eval_argv("/work/plugin/evals", "/work/logs", options())
+def test_nothing_unasked_is_emitted(run_options: RunOptions):
+    argv = eval_argv("/work/plugin/evals", "/work/logs", run_options)
     for flag in ("--runs", "--case", "--tag", "--report", "--mocks", "--eval-dir"):
         assert flag not in argv
 
 
-def test_keep_temp_is_emitted_when_the_run_keeps_its_traces():
+def test_keep_temp_is_emitted_when_the_run_keeps_its_traces(run_options: RunOptions):
     """Without it only an errored run's sandbox is kept, and no passing run leaves a trace."""
-    assert "--keep-temp" in eval_argv("/work/plugin/evals", "/work/logs", options())
+    assert "--keep-temp" in eval_argv("/work/plugin/evals", "/work/logs", run_options)
 
 
-def test_keep_temp_is_not_emitted_when_the_traces_are_turned_off():
-    argv = eval_argv("/work/plugin/evals", "/work/logs", options(keep_traces=False))
+def test_keep_temp_is_not_emitted_when_the_traces_are_turned_off(run_options: RunOptions):
+    argv = eval_argv("/work/plugin/evals", "/work/logs", replace(run_options, keep_traces=False))
     assert "--keep-temp" not in argv
 
 
-def test_the_optional_flags_are_emitted_when_asked():
+def test_the_optional_flags_are_emitted_when_asked(run_options: RunOptions):
     argv = eval_argv(
         "/work/plugin/evals",
         "/work/logs",
-        options(runs=1, case="smoke-*", tags=("plugin", "skill")),
+        replace(run_options, runs=1, case="smoke-*", tags=("plugin", "skill")),
     )
     assert value_after(argv, "--runs") == "1"
     assert value_after(argv, "--case") == "smoke-*"
     assert argv[argv.index("--tag") + 1 :] == ["plugin", "skill"]
 
 
-def test_a_widened_allow_tools_replaces_the_value():
-    argv = eval_argv("/work/plugin/evals", "/work/logs", options(allow_tools=("Bash", "Write")))
+def test_a_widened_allow_tools_replaces_the_value(run_options: RunOptions):
+    argv = eval_argv(
+        "/work/plugin/evals", "/work/logs", replace(run_options, allow_tools=("Bash", "Write"))
+    )
     assert argv[argv.index("--allow-tools") + 1 :] == ["Bash", "Write"]

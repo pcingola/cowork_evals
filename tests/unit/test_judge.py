@@ -8,12 +8,12 @@ tests/integration/test_judge.py. See ../README.md.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from cowork_evals.cases import Grader
+from cowork_evals.cases import BaselineGraderConfig, Grader, LlmGraderConfig
 from cowork_evals.cowork import SessionDocument
 from cowork_evals.judge import (
     CHECK_INSTRUCTION,
@@ -41,35 +41,12 @@ from cowork_evals.judge import (
     truncate,
 )
 
-DATA = Path(__file__).resolve().parent.parent / "data"
-JUDGE = DATA / "judge"
+JUDGE = Path(__file__).resolve().parent.parent / "data" / "judge"
 CASE = JUDGE / "case"
-
-
-def document(name: str) -> SessionDocument:
-    path = DATA / "documents" / f"{name}.json"
-    loaded = SessionDocument.model_validate_json(path.read_text(encoding="utf-8"))
-    return loaded.model_copy(update={"session_dir": str(path.parent / loaded.session_dir)})
 
 
 def recorded(name: str) -> str:
     return (JUDGE / f"{name}.json").read_text(encoding="utf-8")
-
-
-def grader(kind: str, markdown: str = "", name: str = "j", **config: Any) -> Grader:
-    return Grader.build(
-        name=name, type=kind, weight=1, keys=config, markdown=markdown, path=CASE / f"{name}.md"
-    )
-
-
-@pytest.fixture
-def answered() -> SessionDocument:
-    return document("answered")
-
-
-@pytest.fixture
-def produced() -> SessionDocument:
-    return document("produced")
 
 
 # The command line.
@@ -143,12 +120,12 @@ def test_the_caller_beats_the_configured_judge_model(working_directory, tmp_path
 # The composed text.
 
 
-def test_the_criteria_is_the_body_when_no_key_is_written() -> None:
+def test_the_criteria_is_the_body_when_no_key_is_written(grader: Callable[..., Grader]) -> None:
     assert criteria(grader("llm", markdown="The reply is warm.")) == "The reply is warm."
 
 
-def test_a_written_criteria_key_beats_the_body() -> None:
-    written = grader("llm", markdown="the body", criteria="the key")
+def test_a_written_criteria_key_beats_the_body(grader: Callable[..., Grader]) -> None:
+    written = grader("llm", LlmGraderConfig(criteria="the key"), markdown="the body")
     assert criteria(written) == "the key"
 
 
@@ -168,24 +145,39 @@ def test_the_material_is_truncated_head_and_tail() -> None:
     assert truncate("short", MATERIAL_LIMIT) == "short"
 
 
-def test_an_llm_grader_reads_focus_and_ignores_target(answered: SessionDocument) -> None:
-    shown = material(grader("llm", focus="files", target="last_message"), answered, CASE)
+def test_an_llm_grader_reads_focus_and_ignores_target(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    shown = material(
+        grader("llm", LlmGraderConfig(focus="files", target="last_message")), answered, CASE
+    )
     assert shown.error is None
     assert shown.text == "figures/chart.svg\nreport.md"
 
 
-def test_an_llm_grader_defaults_to_the_last_message(answered: SessionDocument) -> None:
+def test_an_llm_grader_defaults_to_the_last_message(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
     shown = material(grader("llm"), answered, CASE)
     assert shown.text == "Hello Alex. The report is in report.md."
 
 
-def test_an_llm_grader_reads_a_produced_file(produced: SessionDocument) -> None:
+def test_an_llm_grader_reads_a_produced_file(
+    produced: SessionDocument, grader: Callable[..., Grader]
+) -> None:
     focus = {"source": "file", "path": "notes.md"}
-    assert material(grader("llm", focus=focus), produced, CASE).text == "A plain note.\n"
+    assert (
+        material(grader("llm", LlmGraderConfig(focus=focus)), produced, CASE).text
+        == "A plain note.\n"
+    )
 
 
-def test_a_baseline_grader_shows_both_trajectories(answered: SessionDocument) -> None:
-    shown = material(grader("baseline", baseline_file="gold/trace.jsonl"), answered, CASE)
+def test_a_baseline_grader_shows_both_trajectories(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    shown = material(
+        grader("baseline", BaselineGraderConfig(baseline_file="gold/trace.jsonl")), answered, CASE
+    )
     assert shown.error is None
     assert "BASELINE TRAJECTORY:" in shown.text
     assert "The report names one option." in shown.text
@@ -193,13 +185,21 @@ def test_a_baseline_grader_shows_both_trajectories(answered: SessionDocument) ->
     assert '"Hello Alex. The report is in report.md."' in shown.text
 
 
-def test_a_baseline_file_outside_the_case_directory_is_refused(answered: SessionDocument) -> None:
-    shown = material(grader("baseline", baseline_file="../reply_pass.json"), answered, CASE)
+def test_a_baseline_file_outside_the_case_directory_is_refused(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    shown = material(
+        grader("baseline", BaselineGraderConfig(baseline_file="../reply_pass.json")), answered, CASE
+    )
     assert shown.error == "../reply_pass.json resolves outside the case directory"
 
 
-def test_an_absent_baseline_file_is_a_failed_grader(answered: SessionDocument) -> None:
-    shown = material(grader("baseline", baseline_file="gold/absent.jsonl"), answered, CASE)
+def test_an_absent_baseline_file_is_a_failed_grader(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    shown = material(
+        grader("baseline", BaselineGraderConfig(baseline_file="gold/absent.jsonl")), answered, CASE
+    )
     assert shown.error is not None
     assert "absent.jsonl" in shown.error
 
@@ -207,17 +207,21 @@ def test_an_absent_baseline_file_is_a_failed_grader(answered: SessionDocument) -
 # What the judge cannot be shown.
 
 
-def test_an_image_focus_is_a_grader_skip_and_not_a_failure(produced: SessionDocument) -> None:
+def test_an_image_focus_is_a_grader_skip_and_not_a_failure(
+    produced: SessionDocument, grader: Callable[..., Grader]
+) -> None:
     focus = {"source": "file", "path": "slide.png"}
-    shown = material(grader("llm", focus=focus), produced, CASE)
+    shown = material(grader("llm", LlmGraderConfig(focus=focus)), produced, CASE)
     assert shown.error is None
     assert shown.skip_reason is not None
     assert "slide.png is an image" in shown.skip_reason
 
 
-def test_another_binary_focus_is_a_failed_grader(produced: SessionDocument) -> None:
+def test_another_binary_focus_is_a_failed_grader(
+    produced: SessionDocument, grader: Callable[..., Grader]
+) -> None:
     focus = {"source": "file", "path": "deck.pptx"}
-    shown = material(grader("llm", focus=focus), produced, CASE)
+    shown = material(grader("llm", LlmGraderConfig(focus=focus)), produced, CASE)
     assert shown.skip_reason is None
     assert shown.error == ("deck.pptx is not UTF-8 text: render it to an image, or write UTF-8")
 
@@ -253,7 +257,7 @@ def test_output_that_is_not_json_is_a_lost_vote() -> None:
     assert reply.cost_usd == 0.0
 
 
-def test_two_of_three_passes() -> None:
+def test_two_of_three_passes(grader: Callable[..., Grader]) -> None:
     judged = tally(
         grader("llm"),
         [read_reply(recorded(name)) for name in ("reply_pass", "reply_fail", "reply_pass")],
@@ -266,7 +270,7 @@ def test_two_of_three_passes() -> None:
     assert judged.cost_usd == pytest.approx(0.0063)
 
 
-def test_one_of_three_fails() -> None:
+def test_one_of_three_fails(grader: Callable[..., Grader]) -> None:
     judged = tally(
         grader("llm"),
         [read_reply(recorded(name)) for name in ("reply_pass", "reply_fail", "reply_fail")],
@@ -276,7 +280,7 @@ def test_one_of_three_fails() -> None:
     assert judged.result.explanation == "judge votes: PASS FAIL FAIL"
 
 
-def test_a_lost_vote_is_not_a_pass() -> None:
+def test_a_lost_vote_is_not_a_pass(grader: Callable[..., Grader]) -> None:
     judged = tally(
         grader("llm"),
         [read_reply(recorded(name)) for name in ("reply_pass", "reply_neither", "reply_neither")],
@@ -287,14 +291,16 @@ def test_a_lost_vote_is_not_a_pass() -> None:
     assert judged.result.judge_votes == [True, False, False]
 
 
-def test_three_lost_votes_are_a_failed_grader_naming_the_reason() -> None:
+def test_three_lost_votes_are_a_failed_grader_naming_the_reason(
+    grader: Callable[..., Grader],
+) -> None:
     judged = tally(grader("llm"), [Reply(error="claude exited 1")] * 3, "Hello.")
     assert judged.result.passed is False
     assert judged.result.judge_votes is None
     assert judged.result.explanation == "the judge could not be asked: claude exited 1"
 
 
-def test_the_evidence_is_truncated() -> None:
+def test_the_evidence_is_truncated(grader: Callable[..., Grader]) -> None:
     judged = tally(grader("llm"), [read_reply(recorded("reply_pass"))] * 3, "x" * 5000)
     assert judged.result.evidence is not None
     assert len(judged.result.evidence) == EVIDENCE_LIMIT + len("\n...\n")
@@ -311,7 +317,9 @@ def reasoned(verdict: str, reasoning: str) -> str:
     )
 
 
-def test_a_reasoned_reply_votes_and_its_reason_reaches_the_grader() -> None:
+def test_a_reasoned_reply_votes_and_its_reason_reaches_the_grader(
+    grader: Callable[..., Grader],
+) -> None:
     """Under the old rule a reply longer than one word was a lost vote, so this grader failed."""
     replies = [read_reply(reasoned(PASS_WORD, "xlsx.sh dedup ran")) for _ in range(3)]
     judged = tally(grader("llm"), replies, "Hello.")
@@ -321,7 +329,9 @@ def test_a_reasoned_reply_votes_and_its_reason_reaches_the_grader() -> None:
     assert judged.cost_usd == pytest.approx(0.0063)
 
 
-def test_the_majority_decides_and_carries_the_winning_side_s_reason() -> None:
+def test_the_majority_decides_and_carries_the_winning_side_s_reason(
+    grader: Callable[..., Grader],
+) -> None:
     replies = [
         read_reply(reasoned(PASS_WORD, "the command ran")),
         read_reply(reasoned(FAIL_WORD, "a script wrote it")),
@@ -333,7 +343,7 @@ def test_the_majority_decides_and_carries_the_winning_side_s_reason() -> None:
     assert "a script wrote it" not in judged.result.explanation
 
 
-def test_a_verdict_outside_the_schema_is_a_lost_vote() -> None:
+def test_a_verdict_outside_the_schema_is_a_lost_vote(grader: Callable[..., Grader]) -> None:
     replies = [read_reply(reasoned("UNSURE", "the trace is ambiguous")) for _ in range(3)]
     judged = tally(grader("llm"), replies, "Hello.")
     assert judged.result.passed is False
@@ -341,7 +351,7 @@ def test_a_verdict_outside_the_schema_is_a_lost_vote() -> None:
     assert "UNSURE" in judged.result.explanation
 
 
-def test_a_bare_word_reply_still_votes() -> None:
+def test_a_bare_word_reply_still_votes(grader: Callable[..., Grader]) -> None:
     """What a CLI too old for `--json-schema` leaves. It votes, and explains nothing."""
     judged = tally(grader("llm"), [read_reply(recorded("reply_pass"))] * 3, "Hello.")
     assert judged.result.passed is True

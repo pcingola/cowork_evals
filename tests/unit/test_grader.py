@@ -8,44 +8,20 @@ semantics are docs/claude_code/plugin_eval_reference.md. See ../README.md.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+from collections.abc import Callable
 
 import pytest
 
-from cowork_evals.cases import FileTarget, Grader
+from cowork_evals.cases import (
+    FileExistsConfig,
+    FileTarget,
+    Grader,
+    RegexConfig,
+    ToolOrderConfig,
+    ToolUsedConfig,
+)
 from cowork_evals.cowork import SessionDocument
 from cowork_evals.grader import _full_match, created, grade, resolve_target
-
-DATA = Path(__file__).resolve().parent.parent / "data" / "documents"
-
-
-def document(name: str) -> SessionDocument:
-    """One recorded session document, with its session directory resolved for this machine.
-
-    An absolute path cannot be committed, so the file names the directory beside it and
-    this is the one line that resolves it.
-    """
-    path = DATA / f"{name}.json"
-    loaded = SessionDocument.model_validate_json(path.read_text(encoding="utf-8"))
-    return loaded.model_copy(update={"session_dir": str(path.parent / loaded.session_dir)})
-
-
-@pytest.fixture
-def answered() -> SessionDocument:
-    return document("answered")
-
-
-@pytest.fixture
-def quiet() -> SessionDocument:
-    return document("quiet")
-
-
-def grader(kind: str, name: str = "g", weight: int | float = 1, **config: Any) -> Grader:
-    return Grader.build(
-        name=name, type=kind, weight=weight, keys=config, markdown="", path=Path(f"{name}.md")
-    )
-
 
 # The targets.
 
@@ -91,29 +67,38 @@ def test_a_path_escaping_outputs_is_refused(answered: SessionDocument) -> None:
 # regex.
 
 
-def test_regex_contains_is_the_default_match(answered: SessionDocument) -> None:
-    result = grade(grader("regex", pattern="Alex"), answered)
+def test_regex_contains_is_the_default_match(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    result = grade(grader("regex", RegexConfig(pattern="Alex")), answered)
     assert result.passed is True
     assert result.explanation == "matched Alex"
     assert result.skipped is False
 
 
-def test_regex_contains_that_finds_nothing_fails(answered: SessionDocument) -> None:
-    result = grade(grader("regex", pattern="Robin"), answered)
+def test_regex_contains_that_finds_nothing_fails(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    result = grade(grader("regex", RegexConfig(pattern="Robin")), answered)
     assert result.passed is False
     assert result.explanation == "no match for Robin"
 
 
-def test_regex_not_contains(answered: SessionDocument) -> None:
-    assert grade(grader("regex", pattern="Robin", match="not_contains"), answered).passed is True
-    failing = grade(grader("regex", pattern="Alex", match="not_contains"), answered)
+def test_regex_not_contains(answered: SessionDocument, grader: Callable[..., Grader]) -> None:
+    assert (
+        grade(grader("regex", RegexConfig(pattern="Robin", match="not_contains")), answered).passed
+        is True
+    )
+    failing = grade(grader("regex", RegexConfig(pattern="Alex", match="not_contains")), answered)
     assert failing.passed is False
     assert failing.explanation == "matched Alex"
 
 
-def test_regex_count_requires_exactly_that_many(answered: SessionDocument) -> None:
+def test_regex_count_requires_exactly_that_many(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
     def counting(wanted: str) -> Grader:
-        return grader("regex", target="files", pattern=r"^\w", flags="m", match=wanted)
+        return grader("regex", RegexConfig(target="files", pattern=r"^\w", flags="m", match=wanted))
 
     exact = grade(counting("count:2"), answered)
     assert exact.passed is True
@@ -121,20 +106,26 @@ def test_regex_count_requires_exactly_that_many(answered: SessionDocument) -> No
     assert grade(counting("count:1"), answered).passed is False
 
 
-def test_regex_flags_map_onto_the_python_engine(answered: SessionDocument) -> None:
-    assert grade(grader("regex", pattern="alex", flags="i"), answered).passed is True
-    assert grade(grader("regex", pattern="alex"), answered).passed is False
+def test_regex_flags_map_onto_the_python_engine(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    assert grade(grader("regex", RegexConfig(pattern="alex", flags="i")), answered).passed is True
+    assert grade(grader("regex", RegexConfig(pattern="alex")), answered).passed is False
 
 
-def test_a_pattern_that_does_not_compile_is_a_failed_grader(answered: SessionDocument) -> None:
-    result = grade(grader("regex", pattern="(unclosed"), answered)
+def test_a_pattern_that_does_not_compile_is_a_failed_grader(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    result = grade(grader("regex", RegexConfig(pattern="(unclosed")), answered)
     assert result.passed is False
     assert result.explanation.startswith("pattern does not compile: ")
 
 
-def test_a_regex_over_an_unreadable_file_carries_the_reason(answered: SessionDocument) -> None:
+def test_a_regex_over_an_unreadable_file_carries_the_reason(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
     target = {"source": "file", "path": "absent.md"}
-    result = grade(grader("regex", target=target, pattern="anything"), answered)
+    result = grade(grader("regex", RegexConfig(target=target, pattern="anything")), answered)
     assert result.passed is False
     assert "absent.md" in result.explanation
 
@@ -142,35 +133,56 @@ def test_a_regex_over_an_unreadable_file_carries_the_reason(answered: SessionDoc
 # tool_used.
 
 
-def test_tool_used_counts_calls_of_that_tool(answered: SessionDocument) -> None:
-    result = grade(grader("tool_used", tool="Read"), answered)
+def test_tool_used_counts_calls_of_that_tool(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    result = grade(grader("tool_used", ToolUsedConfig(tool="Read")), answered)
     assert result.passed is True
     assert result.explanation == "Read called 1x (expected 1 or more)"
 
 
-def test_tool_used_matches_the_json_encoded_input(answered: SessionDocument) -> None:
-    fired = grader("tool_used", tool="Skill", input_match=r'"skill"\s*:\s*"(?:[\w-]+:)?greet"')
+def test_tool_used_matches_the_json_encoded_input(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    fired = grader(
+        "tool_used", ToolUsedConfig(tool="Skill", input_match=r'"skill"\s*:\s*"(?:[\w-]+:)?greet"')
+    )
     assert grade(fired, answered).passed is True
-    other = grader("tool_used", tool="Skill", input_match=r'"skill"\s*:\s*"(?:[\w-]+:)?report"')
+    other = grader(
+        "tool_used", ToolUsedConfig(tool="Skill", input_match=r'"skill"\s*:\s*"(?:[\w-]+:)?report"')
+    )
     assert grade(other, answered).passed is False
 
 
-def test_min_zero_max_zero_passes_on_no_call(answered: SessionDocument) -> None:
+def test_min_zero_max_zero_passes_on_no_call(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
     """The must-not-call idiom. `max: 0` alone can never pass, because `min` stays 1."""
-    never = grade(grader("tool_used", tool="WebFetch", min=0, max=0), answered)
+    never = grade(grader("tool_used", ToolUsedConfig(tool="WebFetch", min=0, max=0)), answered)
     assert never.passed is True
     assert never.explanation == "WebFetch called 0x (expected exactly 0)"
-    assert grade(grader("tool_used", tool="Read", min=0, max=0), answered).passed is False
-    assert grade(grader("tool_used", tool="WebFetch", max=0), answered).passed is False
+    assert (
+        grade(grader("tool_used", ToolUsedConfig(tool="Read", min=0, max=0)), answered).passed
+        is False
+    )
+    assert (
+        grade(grader("tool_used", ToolUsedConfig(tool="WebFetch", max=0)), answered).passed is False
+    )
 
 
-def test_tool_used_reports_a_range(answered: SessionDocument) -> None:
-    result = grade(grader("tool_used", tool="Read", min=1, max=3), answered)
+def test_tool_used_reports_a_range(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    result = grade(grader("tool_used", ToolUsedConfig(tool="Read", min=1, max=3)), answered)
     assert result.explanation == "Read called 1x (expected 1 to 3)"
 
 
-def test_an_input_match_that_does_not_compile_is_a_failed_grader(answered: SessionDocument) -> None:
-    result = grade(grader("tool_used", tool="Skill", input_match="(unclosed"), answered)
+def test_an_input_match_that_does_not_compile_is_a_failed_grader(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    result = grade(
+        grader("tool_used", ToolUsedConfig(tool="Skill", input_match="(unclosed")), answered
+    )
     assert result.passed is False
     assert result.explanation.startswith("input_match does not compile: ")
 
@@ -178,29 +190,34 @@ def test_an_input_match_that_does_not_compile_is_a_failed_grader(answered: Sessi
 # tool_order.
 
 
-def test_tool_order_on_two_tool_names(answered: SessionDocument) -> None:
-    result = grade(grader("tool_order", before="Read", after="Write"), answered)
+def test_tool_order_on_two_tool_names(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    result = grade(grader("tool_order", ToolOrderConfig(before="Read", after="Write")), answered)
     assert result.passed is True
     assert result.explanation == "Read preceded Write"
-    wrong = grade(grader("tool_order", before="Write", after="Read"), answered)
+    wrong = grade(grader("tool_order", ToolOrderConfig(before="Write", after="Read")), answered)
     assert wrong.passed is False
     assert wrong.explanation == "Write did not precede Read"
 
 
-def test_tool_order_takes_the_object_form(answered: SessionDocument) -> None:
+def test_tool_order_takes_the_object_form(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
     result = grade(
         grader(
             "tool_order",
-            before="Read",
-            after={"tool": "Write", "input_match": "report"},
+            ToolOrderConfig(before="Read", after={"tool": "Write", "input_match": "report"}),
         ),
         answered,
     )
     assert result.passed is True
 
 
-def test_tool_order_needs_both_ends_to_have_been_called(answered: SessionDocument) -> None:
-    result = grade(grader("tool_order", before="Read", after="WebFetch"), answered)
+def test_tool_order_needs_both_ends_to_have_been_called(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    result = grade(grader("tool_order", ToolOrderConfig(before="Read", after="WebFetch")), answered)
     assert result.passed is False
     assert result.explanation == "WebFetch was never called"
 
@@ -210,47 +227,64 @@ def test_tool_order_needs_both_ends_to_have_been_called(answered: SessionDocumen
 
 def test_file_exists_matches_a_bare_name_because_the_prefix_is_stripped(
     answered: SessionDocument,
+    grader: Callable[..., Grader],
 ) -> None:
-    result = grade(grader("file_exists", path="report.md"), answered)
+    result = grade(grader("file_exists", FileExistsConfig(path="report.md")), answered)
     assert result.passed is True
     assert result.explanation == "created report.md"
 
 
-def test_file_exists_matches_a_glob_at_any_depth(answered: SessionDocument) -> None:
-    assert grade(grader("file_exists", path="**/*.svg"), answered).passed is True
-    assert grade(grader("file_exists", path="*.svg"), answered).passed is False
+def test_file_exists_matches_a_glob_at_any_depth(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    assert grade(grader("file_exists", FileExistsConfig(path="**/*.svg")), answered).passed is True
+    assert grade(grader("file_exists", FileExistsConfig(path="*.svg")), answered).passed is False
 
 
-def test_file_exists_false_asserts_no_created_file_matches(answered: SessionDocument) -> None:
-    absent = grade(grader("file_exists", path="**/*.pptx", exists=False), answered)
+def test_file_exists_false_asserts_no_created_file_matches(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    absent = grade(
+        grader("file_exists", FileExistsConfig(path="**/*.pptx", exists=False)), answered
+    )
     assert absent.passed is True
     assert absent.explanation == "no created file matches **/*.pptx"
-    present = grade(grader("file_exists", path="report.md", exists=False), answered)
+    present = grade(
+        grader("file_exists", FileExistsConfig(path="report.md", exists=False)), answered
+    )
     assert present.passed is False
     assert present.explanation == "created report.md"
 
 
-def test_file_exists_over_a_session_that_wrote_nothing(quiet: SessionDocument) -> None:
+def test_file_exists_over_a_session_that_wrote_nothing(
+    quiet: SessionDocument, grader: Callable[..., Grader]
+) -> None:
     assert created(quiet) == []
-    assert grade(grader("file_exists", path="report.md"), quiet).passed is False
+    assert grade(grader("file_exists", FileExistsConfig(path="report.md")), quiet).passed is False
 
 
 # What nothing knows.
 
 
-def test_an_unknown_grader_type_is_a_failed_grader_naming_it(answered: SessionDocument) -> None:
+def test_an_unknown_grader_type_is_a_failed_grader_naming_it(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
     result = grade(grader("no_such_type"), answered)
     assert result.passed is False
     assert result.explanation == "unknown grader type: no_such_type"
 
 
-def test_a_grader_file_with_no_type_names_that(answered: SessionDocument) -> None:
+def test_a_grader_file_with_no_type_names_that(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
     result = grade(grader(""), answered)
     assert result.explanation == "unknown grader type: (none)"
 
 
-def test_a_grader_result_carries_its_weight(answered: SessionDocument) -> None:
-    assert grade(grader("regex", weight=2, pattern="Alex"), answered).weight == 2
+def test_a_grader_result_carries_its_weight(
+    answered: SessionDocument, grader: Callable[..., Grader]
+) -> None:
+    assert grade(grader("regex", RegexConfig(pattern="Alex"), weight=2), answered).weight == 2
 
 
 # The glob translation.

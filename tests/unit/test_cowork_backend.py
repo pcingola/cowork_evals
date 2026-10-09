@@ -7,154 +7,145 @@ what a declared case produces is docs/cowork_backend.md. See ../README.md.
 from __future__ import annotations
 
 import json
-import textwrap
-from datetime import datetime, timezone
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from cowork_evals.cases import CaseError, read
 from cowork_evals.config import Config, CoWorkError, CoWorkSection
-from cowork_evals.cowork import RunLogEntry
 from cowork_evals.cowork_backend import declared, grader_skips, plan, run, unrunnable
 from cowork_evals.harness import RESULT_NAME
 
 MANIFEST = '{"name": "skips-fixture", "description": "A fixture.", "version": "0.0.1"}\n'
 
 
-def build(
-    tmp_path: Path,
-    *,
-    frontmatter: str = "",
-    case_yaml: str | None = None,
-    graders: dict[str, str] | None = None,
-    mocks_at: tuple[str, ...] = (),
-    tags: str = "[skill]",
-) -> tuple[Path, Path]:
-    """One plugin root with one case under `evals/skill/case/`. Returns both paths."""
-    root = tmp_path / "plugin"
-    (root / ".claude-plugin").mkdir(parents=True)
-    (root / ".claude-plugin" / "plugin.json").write_text(MANIFEST, encoding="utf-8")
-
-    case_dir = root / "evals" / "skill" / "case"
-    case_dir.mkdir(parents=True)
-    block = textwrap.dedent(frontmatter).strip("\n")
-    (case_dir / "prompt.md").write_text(
-        f"---\nname: one-case\ntags: {tags}\n{block}\n---\n\nReply with exactly: PONG\n",
-        encoding="utf-8",
-    )
-    if case_yaml is not None:
-        (case_dir / "case.yaml").write_text(textwrap.dedent(case_yaml).lstrip("\n"), "utf-8")
-    for name, body in (graders or {}).items():
-        directory = case_dir / "graders"
-        directory.mkdir(exist_ok=True)
-        (directory / f"{name}.md").write_text(textwrap.dedent(body).lstrip("\n"), "utf-8")
-    for relative in mocks_at:
-        (root / relative / "mocks" / "workspace").mkdir(parents=True)
-        (root / relative / "mocks" / "workspace" / "bash.md").write_text("ok\n", "utf-8")
-    return root, case_dir
-
-
-def reasons_of(tmp_path: Path, **kwargs: object) -> tuple[str, ...]:
-    root, case_dir = build(tmp_path, **kwargs)  # type: ignore[arg-type]
+def reasons_of(root: Path, case_dir: Path) -> tuple[str, ...]:
     return unrunnable(read(case_dir), root)
 
 
-def declared_of(tmp_path: Path, **kwargs: object) -> str | None:
-    root, case_dir = build(tmp_path, **kwargs)  # type: ignore[arg-type]
+def declared_of(root: Path, case_dir: Path) -> str | None:
     return declared(read(case_dir), root)
 
 
-def graders_of(tmp_path: Path, **kwargs: object) -> dict[str, str]:
-    _, case_dir = build(tmp_path, **kwargs)  # type: ignore[arg-type]
+def graders_of(case_dir: Path) -> dict[str, str]:
     return grader_skips(read(case_dir))
 
 
 # What a session runs.
 
 
-def test_a_written_out_runs_key_is_runnable(tmp_path: Path) -> None:
-    assert reasons_of(tmp_path, frontmatter="runs: 3") == ()
+def test_a_written_out_runs_key_is_runnable(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    assert reasons_of(*case_tree(tmp_path, frontmatter="runs: 3")) == ()
 
 
-def test_a_written_out_timeout_seconds_is_runnable(tmp_path: Path) -> None:
-    assert reasons_of(tmp_path, frontmatter="timeout_seconds: 600") == ()
+def test_a_written_out_timeout_seconds_is_runnable(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    assert reasons_of(*case_tree(tmp_path, frontmatter="timeout_seconds: 600")) == ()
 
 
-def test_a_case_writing_no_optional_key_is_runnable(tmp_path: Path) -> None:
-    assert reasons_of(tmp_path) == ()
-    assert graders_of(tmp_path / "graders") == {}
-    assert declared_of(tmp_path / "declared") is None
+def test_a_case_writing_no_optional_key_is_runnable(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    assert reasons_of(*case_tree(tmp_path)) == ()
+    assert graders_of(case_tree(tmp_path / "graders")[1]) == {}
+    assert declared_of(*case_tree(tmp_path / "declared")) is None
 
 
-def test_an_arm_on_a_grader_is_honoured(tmp_path: Path) -> None:
+def test_an_arm_on_a_grader_is_honoured(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
     """One arm runs, it is the with-arm, and every grader is scored in it."""
     graders = {
         "with-only": "---\ntype: regex\npattern: PONG\narm: with-only\n---\n",
         "both": "---\ntype: regex\npattern: PONG\narm: both\n---\n",
     }
-    assert reasons_of(tmp_path, graders=graders) == ()
-    assert graders_of(tmp_path / "graders", graders=graders) == {}
+    assert reasons_of(*case_tree(tmp_path, graders=graders)) == ()
+    assert graders_of(case_tree(tmp_path / "graders", graders=graders)[1]) == {}
 
 
 # The three sources that make a case unrunnable here.
 
 
-def test_a_written_out_max_turns_is_a_reason(tmp_path: Path) -> None:
-    assert reasons_of(tmp_path, frontmatter="max_turns: 12") == (
+def test_a_written_out_max_turns_is_a_reason(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    assert reasons_of(*case_tree(tmp_path, frontmatter="max_turns: 12")) == (
         "max_turns: no turn cap reaches a CoWork session",
     )
 
 
-def test_each_execution_key_is_a_reason(tmp_path: Path) -> None:
+def test_each_execution_key_is_a_reason(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
     for key, written in (
         ("model", "model: sonnet"),
         ("allowed_tools", "allowed_tools: [Read]"),
         ("append_system_prompt", "append_system_prompt: Be brief."),
         ("env", "env:\n  EVAL_ONE: two"),
     ):
-        reasons = reasons_of(tmp_path / key, frontmatter=written)
+        reasons = reasons_of(*case_tree(tmp_path / key, frontmatter=written))
         assert len(reasons) == 1
         assert reasons[0].startswith(f"{key}: ")
 
 
-def test_a_context_key_in_case_yaml_is_a_reason(tmp_path: Path) -> None:
+def test_a_context_key_in_case_yaml_is_a_reason(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
     assert reasons_of(
-        tmp_path,
-        case_yaml="""
+        *case_tree(
+            tmp_path,
+            case_yaml="""
         schema_version: "1.1"
         name: one-case
         context:
           add_dirs: [resources]
         """,
+        )
     ) == ("context.add_dirs: nothing stages files into the VM",)
 
 
-def test_a_suite_wide_mocks_directory_is_a_reason(tmp_path: Path) -> None:
-    reasons = reasons_of(tmp_path, mocks_at=("evals",))
+def test_a_suite_wide_mocks_directory_is_a_reason(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    reasons = reasons_of(*case_tree(tmp_path, mocks_at=("evals",)))
     assert len(reasons) == 1
     assert reasons[0].startswith(str(tmp_path / "plugin" / "evals" / "mocks"))
 
 
-def test_a_group_mocks_directory_is_a_reason(tmp_path: Path) -> None:
-    reasons = reasons_of(tmp_path, mocks_at=("evals/skill",))
+def test_a_group_mocks_directory_is_a_reason(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    reasons = reasons_of(*case_tree(tmp_path, mocks_at=("evals/skill",)))
     assert len(reasons) == 1
     assert "evals/skill/mocks" in reasons[0]
 
 
-def test_a_case_mocks_directory_is_a_reason_for_that_case_alone(tmp_path: Path) -> None:
-    reasons = reasons_of(tmp_path, mocks_at=("evals/skill/case",))
+def test_a_case_mocks_directory_is_a_reason_for_that_case_alone(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    reasons = reasons_of(*case_tree(tmp_path, mocks_at=("evals/skill/case",)))
     assert len(reasons) == 1
     assert "evals/skill/case/mocks" in reasons[0]
 
 
-def test_every_mocks_layer_is_reported(tmp_path: Path) -> None:
-    assert len(reasons_of(tmp_path, mocks_at=("evals", "evals/skill", "evals/skill/case"))) == 3
+def test_every_mocks_layer_is_reported(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    assert (
+        len(reasons_of(*case_tree(tmp_path, mocks_at=("evals", "evals/skill", "evals/skill/case"))))
+        == 3
+    )
 
 
-def test_a_mocks_directory_beside_the_plugin_root_is_not_a_layer(tmp_path: Path) -> None:
+def test_a_mocks_directory_beside_the_plugin_root_is_not_a_layer(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
     """The layers run from `evals/` down. Nothing above it is one."""
-    root, case_dir = build(tmp_path)
+    root, case_dir = case_tree(tmp_path)
     (root / "mocks").mkdir()
     assert unrunnable(read(case_dir), root) == ()
 
@@ -162,39 +153,49 @@ def test_a_mocks_directory_beside_the_plugin_root_is_not_a_layer(tmp_path: Path)
 # What the tag declares.
 
 
-def test_the_tag_carries_every_reason_into_one_line(tmp_path: Path) -> None:
-    line = declared_of(tmp_path, frontmatter="max_turns: 12", tags="[skill, no-cowork]")
+def test_the_tag_carries_every_reason_into_one_line(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    line = declared_of(*case_tree(tmp_path, frontmatter="max_turns: 12", tags="[skill, no-cowork]"))
     assert line == "no-cowork: max_turns: no turn cap reaches a CoWork session"
 
 
-def test_a_case_carrying_the_tag_and_no_reason_still_declares_itself(tmp_path: Path) -> None:
+def test_a_case_carrying_the_tag_and_no_reason_still_declares_itself(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
     """The validator refuses that case. The backend reads the tag and submits nothing."""
-    assert declared_of(tmp_path, tags="[skill, no-cowork]") == "no-cowork"
+    assert declared_of(*case_tree(tmp_path, tags="[skill, no-cowork]")) == "no-cowork"
 
 
-def test_a_case_with_a_reason_and_no_tag_is_not_declared(tmp_path: Path) -> None:
+def test_a_case_with_a_reason_and_no_tag_is_not_declared(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
     """The tag decides here, and the validator is what keeps the two in step."""
-    assert declared_of(tmp_path, frontmatter="max_turns: 12") is None
+    assert declared_of(*case_tree(tmp_path, frontmatter="max_turns: 12")) is None
 
 
 # The one grader skip decided before a run.
 
 
-def test_a_grader_reading_mock_calls_is_skipped_and_the_case_still_runs(tmp_path: Path) -> None:
+def test_a_grader_reading_mock_calls_is_skipped_and_the_case_still_runs(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
     graders = {
         "asked-the-server": "---\ntype: regex\ntarget: mock_calls\npattern: posted\n---\n",
         "answered": "---\ntype: regex\ntarget: last_message\npattern: PONG\n---\n",
     }
-    assert reasons_of(tmp_path, graders=graders) == ()
-    skipped = graders_of(tmp_path / "graders", graders=graders)
+    assert reasons_of(*case_tree(tmp_path, graders=graders)) == ()
+    skipped = graders_of(case_tree(tmp_path / "graders", graders=graders)[1])
     assert list(skipped) == ["asked-the-server"]
     assert "mock_calls" in skipped["asked-the-server"]
 
 
-def test_a_judged_grader_focusing_mock_calls_is_skipped(tmp_path: Path) -> None:
+def test_a_judged_grader_focusing_mock_calls_is_skipped(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
     graders = {"judged": "---\ntype: llm\nfocus: mock_calls\n---\n\nThe server was asked.\n"}
-    assert reasons_of(tmp_path, graders=graders) == ()
-    assert list(graders_of(tmp_path / "graders", graders=graders)) == ["judged"]
+    assert reasons_of(*case_tree(tmp_path, graders=graders)) == ()
+    assert list(graders_of(case_tree(tmp_path / "graders", graders=graders)[1])) == ["judged"]
 
 
 # The plan. Nothing below starts a session, and none of it needs a profile.
@@ -209,17 +210,6 @@ def settings(tmp_path: Path, **overrides: object) -> Config:
     values: dict[str, object] = {"run_log": str(tmp_path / "runs.jsonl"), "log_dir": None}
     values.update(overrides)
     return Config(cowork=CoWorkSection(**values))  # type: ignore[arg-type]
-
-
-def log(path: Path, submissions: int) -> None:
-    """A hand-written run log, `submissions` entries inside the trailing 24 hours."""
-    entry = RunLogEntry(
-        timestamp=datetime.now(timezone.utc),
-        prompt_sha256="0" * 64,
-        session_dir=None,
-        outcome="submitted",
-    )
-    path.write_text((entry.model_dump_json() + "\n") * submissions, encoding="utf-8")
 
 
 def test_the_smoke_fixture_is_found_and_four_of_its_cases_are_submitted(tmp_path: Path) -> None:
@@ -276,8 +266,10 @@ def test_a_case_declaring_no_timeout_runs_under_the_configured_one(tmp_path: Pat
     assert prepared.entries[0].timeout_seconds == 900.0
 
 
-def test_a_declared_case_costs_no_ceiling_entry(tmp_path: Path) -> None:
-    root, _ = build(tmp_path, frontmatter="max_turns: 12\nruns: 4", tags="[skill, no-cowork]")
+def test_a_declared_case_costs_no_ceiling_entry(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    root, _ = case_tree(tmp_path, frontmatter="max_turns: 12\nruns: 4", tags="[skill, no-cowork]")
     prepared = plan(root, config=settings(tmp_path))
     assert prepared.entries[0].declared is not None
     assert prepared.entries[0].runs == 4
@@ -285,10 +277,12 @@ def test_a_declared_case_costs_no_ceiling_entry(tmp_path: Path) -> None:
     assert prepared.submissions == 0
 
 
-def test_the_ceiling_arithmetic_is_the_plan_plus_the_run_log(tmp_path: Path) -> None:
+def test_the_ceiling_arithmetic_is_the_plan_plus_the_run_log(
+    tmp_path: Path, run_log: Callable[..., None]
+) -> None:
     """One case of the two, so the arithmetic is read off one number and not off the suite."""
     config = settings(tmp_path, max_runs=3)
-    log(tmp_path / "runs.jsonl", 2)
+    run_log(tmp_path / "runs.jsonl", 2)
     prepared = plan(SMOKE, config=config, runs=1, case_glob="python-version")
     assert prepared.recent == 2
     assert prepared.max_runs == 3
@@ -300,8 +294,10 @@ def test_the_ceiling_arithmetic_is_the_plan_plus_the_run_log(tmp_path: Path) -> 
     assert "max_runs is 3" in prepared.refusal
 
 
-def test_run_refuses_above_the_ceiling_before_submitting_anything(tmp_path: Path) -> None:
-    log(tmp_path / "runs.jsonl", 5)
+def test_run_refuses_above_the_ceiling_before_submitting_anything(
+    tmp_path: Path, run_log: Callable[..., None]
+) -> None:
+    run_log(tmp_path / "runs.jsonl", 5)
     output = tmp_path / "out"
     output.mkdir()
     with pytest.raises(CoWorkError) as raised:
@@ -342,8 +338,10 @@ def test_a_target_under_no_plugin_root_raises(tmp_path: Path) -> None:
 # The document a suite of skipped cases produces.
 
 
-def test_a_suite_of_declared_cases_writes_a_document_and_submits_nothing(tmp_path: Path) -> None:
-    root, _ = build(tmp_path, frontmatter="model: sonnet", tags="[skill, no-cowork]")
+def test_a_suite_of_declared_cases_writes_a_document_and_submits_nothing(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    root, _ = case_tree(tmp_path, frontmatter="model: sonnet", tags="[skill, no-cowork]")
     output = tmp_path / "out"
     output.mkdir()
     written = run(root, output, config=settings(tmp_path))
@@ -369,8 +367,10 @@ def test_a_suite_of_declared_cases_writes_a_document_and_submits_nothing(tmp_pat
     assert driver_log_is_empty(tmp_path), "the driver was never called"
 
 
-def test_the_judge_model_override_reaches_the_suite(tmp_path: Path) -> None:
-    root, _ = build(tmp_path, frontmatter="model: sonnet", tags="[skill, no-cowork]")
+def test_the_judge_model_override_reaches_the_suite(
+    tmp_path: Path, case_tree: Callable[..., tuple[Path, Path]]
+) -> None:
+    root, _ = case_tree(tmp_path, frontmatter="model: sonnet", tags="[skill, no-cowork]")
     output = tmp_path / "out"
     output.mkdir()
     written = run(root, output, config=settings(tmp_path), judge_model="opus")

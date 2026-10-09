@@ -28,12 +28,6 @@ STARTED = "2026-09-09T10:00:00+00:00"
 VERSION = "2.1.265"
 
 
-def session(name: str) -> SessionDocument:
-    path = DATA / "documents" / f"{name}.json"
-    loaded = SessionDocument.model_validate_json(path.read_text(encoding="utf-8"))
-    return loaded.model_copy(update={"session_dir": str(path.parent / loaded.session_dir)})
-
-
 def result(name: str, passed: bool, weight: int | float = 1, **extra: Any) -> GraderResult:
     return GraderResult(
         name=name, passed=passed, weight=weight, explanation=f"{name} {passed}", **extra
@@ -74,8 +68,8 @@ def suite(cases: list[CaseEntry], **kwargs: Any) -> dict[str, Any]:
 # The run.
 
 
-def test_a_run_is_built_from_the_session_document() -> None:
-    run = RunEntry.collected(session("answered"), (result("g", True),), timeout_seconds=1800.0)
+def test_a_run_is_built_from_the_session_document(answered: SessionDocument) -> None:
+    run = RunEntry.collected(answered, (result("g", True),), timeout_seconds=1800.0)
     entry = dump(run)
     assert entry["turns"] == 1, "one assistant turn"
     assert entry["startedAt"] == "2026-09-09T10:00:00.000Z"
@@ -86,8 +80,10 @@ def test_a_run_is_built_from_the_session_document() -> None:
     assert entry["cowork"] == {"sessionDir": run.cowork.session_dir, "timeoutSeconds": 1800.0}
 
 
-def test_a_session_with_no_timestamp_and_no_transcript_omits_three_fields() -> None:
-    document = session("quiet").model_copy(update={"submitted_at": None})
+def test_a_session_with_no_timestamp_and_no_transcript_omits_three_fields(
+    quiet: SessionDocument,
+) -> None:
+    document = quiet.model_copy(update={"submitted_at": None})
     entry = dump(RunEntry.collected(document, (), timeout_seconds=300.0))
     assert "startedAt" not in entry
     assert "durationSeconds" not in entry
@@ -320,11 +316,11 @@ def test_the_document_is_written_under_the_one_name(tmp_path: Path) -> None:
     assert json.loads(path.read_text(encoding="utf-8"))["schemaVersion"] == 1
 
 
-def test_the_document_is_json_serializable_with_a_real_case() -> None:
+def test_the_document_is_json_serializable_with_a_real_case(answered: SessionDocument) -> None:
     entry = CaseEntry.build(
         read(CASE_DIR),
         TREE.resolve(),
-        (RunEntry.collected(session("answered"), (result("a", True),), timeout_seconds=1800.0),),
+        (RunEntry.collected(answered, (result("a", True),), timeout_seconds=1800.0),),
     )
     json.dumps(suite([entry]))
 

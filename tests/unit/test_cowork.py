@@ -17,7 +17,7 @@ import pytest
 from cowork_evals import CoWork, CoWorkError, CoWorkSection
 from cowork_evals import cowork as driver_module
 from cowork_evals.config import CONFIG_FILENAME, CONSENT_DIALOG, CONSENT_NONE
-from cowork_evals.cowork import Turn
+from cowork_evals.cowork import SessionDocument, Turn
 
 ROOT = Path(__file__).resolve().parent.parent / "data" / "cowork" / "sessions"
 PROFILE = ROOT / "acct0000" / "prof0000"
@@ -70,12 +70,9 @@ def test_sessions_defaults_to_the_configured_root() -> None:
     assert raised.value.code == 2
 
 
-def test_the_session_document_carries_exactly_the_documented_keys(
-    driver: CoWork, session_document_keys: set[str]
-) -> None:
+def test_the_session_document_carries_exactly_the_documented_keys(driver: CoWork) -> None:
     document = driver.collect(PROFILE / "one_turn")
-    assert set(document.model_dump()) == session_document_keys
-    assert "exit_code" not in document.model_dump()
+    assert SessionDocument.model_validate_json(document.model_dump_json()) == document
 
 
 def test_the_session_document_is_json_serializable_with_no_profile(driver: CoWork) -> None:

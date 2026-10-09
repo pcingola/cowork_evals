@@ -9,14 +9,13 @@ preflight table in docs/cli.md. See ../README.md.
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from cowork_evals import preflight
 from cowork_evals.config import Config
-from cowork_evals.cowork import RunLogEntry
 
 DATA = Path(__file__).resolve().parent.parent / "data"
 TREE = DATA / "cases" / "tree"
@@ -124,25 +123,18 @@ def test_the_platform_is_reported_only_off_macos(tmp_path: Path) -> None:
 # The rate ceiling.
 
 
-def run_log(path: Path, entries: int) -> None:
-    """A CoWork run log carrying `entries` submissions inside the trailing 24 hours."""
-    entry = RunLogEntry(
-        timestamp=datetime.now(timezone.utc),
-        prompt_sha256="0" * 64,
-        session_dir=None,
-        outcome="collected",
-    )
-    path.write_text((entry.model_dump_json() + "\n") * entries, encoding="utf-8")
-
-
-def test_a_suite_inside_the_ceiling_reports_nothing(tmp_path: Path) -> None:
+def test_a_suite_inside_the_ceiling_reports_nothing(
+    tmp_path: Path, run_log: Callable[..., None]
+) -> None:
     log = tmp_path / "runs.jsonl"
     run_log(log, 2)
     config = configured(tmp_path, f"cowork:\n  max_runs: 50\n  run_log: {log}\n")
     assert preflight.cowork_ceiling(TREE / "evals", config=config) == []
 
 
-def test_a_suite_above_the_ceiling_is_one_line_carrying_the_arithmetic(tmp_path: Path) -> None:
+def test_a_suite_above_the_ceiling_is_one_line_carrying_the_arithmetic(
+    tmp_path: Path, run_log: Callable[..., None]
+) -> None:
     """`tests/data/cases/tree/evals` holds four cases, two of which this backend can honour."""
     log = tmp_path / "runs.jsonl"
     run_log(log, 3)
@@ -153,7 +145,9 @@ def test_a_suite_above_the_ceiling_is_one_line_carrying_the_arithmetic(tmp_path:
     ]
 
 
-def test_the_ceiling_reads_the_filters_it_is_given(tmp_path: Path) -> None:
+def test_the_ceiling_reads_the_filters_it_is_given(
+    tmp_path: Path, run_log: Callable[..., None]
+) -> None:
     log = tmp_path / "runs.jsonl"
     run_log(log, 3)
     config = configured(tmp_path, f"cowork:\n  max_runs: 3\n  run_log: {log}\n")

@@ -161,16 +161,6 @@ def test_the_dockerfile_installs_the_pinned_list_with_no_deps():
 # The run argument list.
 
 
-@pytest.fixture
-def plugin(tmp_path):
-    """A plugin root with a `tests/` directory under it. Nothing here starts a container."""
-    root = tmp_path / "smoke"
-    (root / ".claude-plugin").mkdir(parents=True)
-    (root / ".claude-plugin" / "plugin.json").write_text("{}")
-    (root / "tests").mkdir()
-    return root
-
-
 def test_run_argv_mounts_the_plugin_root_read_write(plugin):
     """pytest writes `.pytest_cache` and `__pycache__` beside a suite, as it does on a laptop."""
     argv = image().run_argv(plugin)

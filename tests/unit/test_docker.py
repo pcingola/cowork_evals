@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -41,7 +42,6 @@ from cowork_evals.docker import (
     remedy,
     remove_image_argv,
 )
-from cowork_evals.harness import RunOptions
 
 # The zone `docker image ls` printed in the recorded listing below.
 EDT = timezone(timedelta(hours=-4))
@@ -261,21 +261,12 @@ def plugin(tmp_path):
     return root
 
 
-def run_options(**overrides) -> RunOptions:
-    fixed = {
-        "model": "sonnet",
-        "judge_model": "haiku",
-        "ablation": "none",
-        "max_cost_usd": "5",
-        "allow_tools": ("Bash",),
-    }
-    return RunOptions(**{**fixed, **overrides})
-
-
-def test_run_argv_mounts_the_plugin_read_only_and_the_logs_read_write(plugin, tmp_path):
+def test_run_argv_mounts_the_plugin_read_only_and_the_logs_read_write(
+    plugin, tmp_path, run_options
+):
     logs = tmp_path / "logs"
     logs.mkdir()
-    argv = backend().run_argv(plugin, logs, run_options())
+    argv = backend().run_argv(plugin, logs, run_options)
     mounts = [argv[i + 1] for i, value in enumerate(argv) if value == "-v"]
     assert mounts[-3:-1] == [
         f"{plugin.resolve()}:/work/plugin:ro",
@@ -283,8 +274,8 @@ def test_run_argv_mounts_the_plugin_read_only_and_the_logs_read_write(plugin, tm
     ]
 
 
-def test_run_argv_carries_the_uid_the_home_and_the_sandbox_options(plugin, tmp_path):
-    argv = backend().run_argv(plugin, tmp_path, run_options())
+def test_run_argv_carries_the_uid_the_home_and_the_sandbox_options(plugin, tmp_path, run_options):
+    argv = backend().run_argv(plugin, tmp_path, run_options)
     assert argv[:3] == ["docker", "run", "--rm"]
     assert build_arg(argv, "--platform") == "linux/arm64"
     assert build_arg(argv, "--user") == f"{os.getuid()}:{os.getgid()}"
@@ -294,29 +285,29 @@ def test_run_argv_carries_the_uid_the_home_and_the_sandbox_options(plugin, tmp_p
     assert "CLAUDE_CODE_WALNUT_SPIRE=1" in argv
 
 
-def test_the_container_side_target_is_relative_to_the_plugin_root(plugin, tmp_path):
+def test_the_container_side_target_is_relative_to_the_plugin_root(plugin, tmp_path, run_options):
     case = plugin / "evals" / "plugin" / "python-version"
-    argv = backend().run_argv(case, tmp_path, run_options())
+    argv = backend().run_argv(case, tmp_path, run_options)
     assert "/work/plugin/evals/plugin/python-version" in argv
 
 
-def test_the_plugin_root_itself_is_the_mount_point(plugin, tmp_path):
-    argv = backend().run_argv(plugin, tmp_path, run_options())
+def test_the_plugin_root_itself_is_the_mount_point(plugin, tmp_path, run_options):
+    argv = backend().run_argv(plugin, tmp_path, run_options)
     assert "/work/plugin" in argv
 
 
-def test_the_output_dir_is_the_log_mount(plugin, tmp_path):
-    argv = backend().run_argv(plugin, tmp_path, run_options())
+def test_the_output_dir_is_the_log_mount(plugin, tmp_path, run_options):
+    argv = backend().run_argv(plugin, tmp_path, run_options)
     assert build_arg(argv, "--output-dir") == "/work/logs"
     assert build_arg(argv, "--debug-file") == "/work/logs/debug.txt"
 
 
-def test_the_two_login_paths_are_mounted_read_write(plugin, tmp_path):
+def test_the_two_login_paths_are_mounted_read_write(plugin, tmp_path, run_options):
     """The one credential route. docs/docker.md."""
     logs = tmp_path / "logs"
     logs.mkdir()
     docker = backend()
-    argv = docker.run_argv(plugin, logs, run_options())
+    argv = docker.run_argv(plugin, logs, run_options)
     mounts = [argv[i + 1] for i, value in enumerate(argv) if value == "-v"]
     assert mounts == [
         f"{docker.claude_dir}:{CONTAINER_HOME}/.claude:rw",
@@ -327,30 +318,34 @@ def test_the_two_login_paths_are_mounted_read_write(plugin, tmp_path):
     ]
 
 
-def test_run_argv_ends_with_the_tag_and_the_harness_command(plugin, tmp_path):
+def test_run_argv_ends_with_the_tag_and_the_harness_command(plugin, tmp_path, run_options):
     docker = backend()
-    argv = docker.run_argv(plugin, tmp_path, run_options())
+    argv = docker.run_argv(plugin, tmp_path, run_options)
     image = argv.index(docker.tag)
     assert argv[image + 1 : image + 4] == ["claude", "--debug-file", "/work/logs/debug.txt"]
     assert "--no-publish" in argv[image:]
 
 
-def test_run_argv_mounts_nothing_else_from_the_host(plugin, tmp_path):
+def test_run_argv_mounts_nothing_else_from_the_host(plugin, tmp_path, run_options):
     """The two login paths, the plugin, the logs and the keep file. Nothing else."""
-    argv = backend().run_argv(plugin, tmp_path, run_options())
+    argv = backend().run_argv(plugin, tmp_path, run_options)
     assert argv.count("-v") == 5
 
 
-def test_a_run_keeping_its_traces_puts_the_harness_tmpdir_in_the_log_mount(plugin, tmp_path):
+def test_a_run_keeping_its_traces_puts_the_harness_tmpdir_in_the_log_mount(
+    plugin, tmp_path, run_options
+):
     """The log mount is the only writable host path, so a kept sandbox has to land there."""
-    argv = backend().run_argv(plugin, tmp_path, run_options(keep_traces=True))
+    argv = backend().run_argv(plugin, tmp_path, replace(run_options, keep_traces=True))
     assert f"TMPDIR={CONTAINER_TMPDIR}" in argv
     assert CONTAINER_TMPDIR.startswith(f"{CONTAINER_LOGS}/")
     assert "--keep-temp" in argv
 
 
-def test_a_run_that_keeps_no_trace_moves_no_tmpdir_and_keeps_no_sandbox(plugin, tmp_path):
-    argv = backend().run_argv(plugin, tmp_path, run_options(keep_traces=False))
+def test_a_run_that_keeps_no_trace_moves_no_tmpdir_and_keeps_no_sandbox(
+    plugin, tmp_path, run_options
+):
+    argv = backend().run_argv(plugin, tmp_path, replace(run_options, keep_traces=False))
     assert not [value for value in argv if value.startswith("TMPDIR=")]
     assert "--keep-temp" not in argv
 
@@ -670,8 +665,8 @@ def test_run_preamble_and_its_redacted_form_carry_the_host_zone():
         assert f"TZ={host_zone()}" in forwarded(argv)
 
 
-def test_run_argv_mounts_the_keep_file_read_only(plugin, tmp_path):
-    argv = backend().run_argv(plugin, tmp_path, run_options())
+def test_run_argv_mounts_the_keep_file_read_only(plugin, tmp_path, run_options):
+    argv = backend().run_argv(plugin, tmp_path, run_options)
     mounts = [argv[i + 1] for i, value in enumerate(argv) if value == "-v"]
     assert f"{tmp_path.resolve() / KEEP_FILE}:{CONTAINER_KEEP_FILE}:ro" in mounts
 

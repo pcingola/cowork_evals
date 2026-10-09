@@ -57,16 +57,6 @@ def image() -> PytestImage:
     return configured
 
 
-@pytest.fixture
-def plugin(tmp_path: Path) -> Path:
-    """A plugin root outside this repository, so a test may write into its own tree."""
-    root = tmp_path / "consumer"
-    (root / ".claude-plugin").mkdir(parents=True)
-    (root / ".claude-plugin" / "plugin.json").write_text('{"name": "consumer"}')
-    (root / "tests").mkdir()
-    return root
-
-
 def output(image: PytestImage, target: Path, *pytest_args: str) -> tuple[int, str]:
     """One real run, through the backend's own argument list, with the output captured.
 
