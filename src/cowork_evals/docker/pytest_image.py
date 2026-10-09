@@ -29,6 +29,7 @@ from . import (
     Condition,
     Docker,
     DockerError,
+    Unmet,
     plugin_root,
     remedy,
 )
@@ -204,29 +205,32 @@ class PytestImage:
         """
         unmet = self.check()
         if unmet:
-            raise DockerError("; ".join(message for _, message in unmet))
+            raise DockerError("; ".join(line.message for line in unmet))
         return subprocess.run(self.run_argv(target, pytest_args=pytest_args)).returncode
 
-    def check(self) -> list[tuple[Condition, str]]:
+    def check(self) -> list[Unmet]:
         """The unmet conditions, in order, each with the command that fixes it.
 
         An empty list means ready. It writes nothing and builds nothing.
         `Condition.CREDENTIAL` is never returned: there is no login in this path.
         """
-        unmet: list[tuple[Condition, str]] = []
+        unmet: list[Unmet] = []
         if not self.docker.daemon_is_reachable():
             unmet.append(
-                (Condition.DAEMON, f"docker daemon is not reachable: {remedy(Condition.DAEMON)}")
+                Unmet(
+                    Condition.DAEMON,
+                    f"docker daemon is not reachable: {remedy(Condition.DAEMON)}",
+                )
             )
         # Neither image is readable without a daemon. The base is reported before the
         # layer over it, because building the layer needs it.
         elif not self.docker.image_is_present():
             unmet.append(
-                (
+                Unmet(
                     Condition.IMAGE,
                     f"base image {self.docker.tag} is absent: {remedy(Condition.IMAGE)}",
                 )
             )
         elif not self.image_is_present():
-            unmet.append((Condition.IMAGE, f"image {self.tag} is absent: {BUILD_REMEDY}"))
+            unmet.append(Unmet(Condition.IMAGE, f"image {self.tag} is absent: {BUILD_REMEDY}"))
         return unmet

@@ -33,6 +33,7 @@ from cowork_evals.docker import (
     Condition,
     Docker,
     DockerError,
+    Image,
     host_zone,
     images_argv,
     parse_images,
@@ -433,14 +434,14 @@ def test_a_value_is_read_once_and_not_again_at_container_start(monkeypatch):
 def test_an_absent_name_is_one_unmet_condition_naming_it(monkeypatch):
     monkeypatch.delenv(PROBE, raising=False)
     unmet = backend(env_passthrough=[PROBE]).check_environment()
-    assert [condition for condition, _ in unmet] == [Condition.ENVIRONMENT]
-    assert PROBE in unmet[0][1]
+    assert [line.condition for line in unmet] == [Condition.ENVIRONMENT]
+    assert PROBE in unmet[0].message
 
 
 def test_an_empty_name_is_the_same_condition(monkeypatch):
     """An empty string is not a value."""
     monkeypatch.setenv(PROBE, "")
-    assert [condition for condition, _ in backend(env_passthrough=[PROBE]).check_environment()] == [
+    assert [line.condition for line in backend(env_passthrough=[PROBE]).check_environment()] == [
         Condition.ENVIRONMENT
     ]
 
@@ -449,30 +450,30 @@ def test_a_credential_name_is_refused_whatever_it_holds(monkeypatch):
     for name in sorted(CREDENTIAL_NAMES):
         monkeypatch.setenv(name, VALUE)
         unmet = backend(env_passthrough=[name]).check_environment()
-        assert [condition for condition, _ in unmet] == [Condition.ENV_CREDENTIAL], name
-        assert name in unmet[0][1]
-        assert "cowork_evals login --docker" in unmet[0][1]
+        assert [line.condition for line in unmet] == [Condition.ENV_CREDENTIAL], name
+        assert name in unmet[0].message
+        assert "cowork_evals login --docker" in unmet[0].message
 
 
 def test_a_credential_name_is_refused_when_the_host_does_not_set_it_either(monkeypatch):
     for name in sorted(CREDENTIAL_NAMES):
         monkeypatch.delenv(name, raising=False)
         unmet = backend(env_passthrough=[name]).check_environment()
-        assert [condition for condition, _ in unmet] == [Condition.ENV_CREDENTIAL], name
+        assert [line.condition for line in unmet] == [Condition.ENV_CREDENTIAL], name
 
 
 def test_no_message_about_a_forwarded_variable_carries_its_value(monkeypatch):
     monkeypatch.setenv(PROBE, VALUE)
     monkeypatch.setenv("ANTHROPIC_API_KEY", VALUE)
     unmet = backend(env_passthrough=[PROBE, "ANTHROPIC_API_KEY"]).check_environment()
-    assert VALUE not in " ".join(message for _, message in unmet)
+    assert VALUE not in " ".join(line.message for line in unmet)
 
 
 def test_the_conditions_reach_the_whole_check(monkeypatch):
     """`check --docker` reports them, so a developer sees them without starting a run."""
     monkeypatch.delenv(PROBE, raising=False)
     unmet = backend(env_passthrough=[PROBE]).check()
-    assert Condition.ENVIRONMENT in [condition for condition, _ in unmet]
+    assert Condition.ENVIRONMENT in [line.condition for line in unmet]
 
 
 def credential(docker, **oauth) -> None:
@@ -615,9 +616,9 @@ def test_a_recorded_listing_parses_into_tags_and_dates():
         "cowork-evals:9e9d75cdfb6e\t2026-09-08 16:47:25 -0400 EDT\n"
     )
     assert parse_images(listing) == [
-        ("cowork-evals-test:0eafee9a4184", datetime(2026, 9, 9, 5, 15, 58, tzinfo=EDT)),
-        ("cowork-evals:57f48ba2adac", datetime(2026, 9, 9, 4, 8, 37, tzinfo=EDT)),
-        ("cowork-evals:9e9d75cdfb6e", datetime(2026, 9, 8, 16, 47, 25, tzinfo=EDT)),
+        Image("cowork-evals-test:0eafee9a4184", datetime(2026, 9, 9, 5, 15, 58, tzinfo=EDT)),
+        Image("cowork-evals:57f48ba2adac", datetime(2026, 9, 9, 4, 8, 37, tzinfo=EDT)),
+        Image("cowork-evals:9e9d75cdfb6e", datetime(2026, 9, 8, 16, 47, 25, tzinfo=EDT)),
     ]
 
 
@@ -631,7 +632,7 @@ def test_the_listing_is_sorted_by_tag():
         "cowork-evals:ff78131ca4c5\t2026-09-08 18:38:34 -0400 EDT\n"
         "cowork-evals:0b8b9652310f\t2026-09-08 17:56:46 -0400 EDT\n"
     )
-    assert [tag for tag, _ in parse_images(listing)] == [
+    assert [image.tag for image in parse_images(listing)] == [
         "cowork-evals:0b8b9652310f",
         "cowork-evals:ff78131ca4c5",
     ]

@@ -37,7 +37,7 @@ unmet() {
   uv run --project "$ROOT" python3 -c "
 from cowork_evals.docker.pytest_image import PytestImage
 
-print('\n'.join(message for _, message in PytestImage().check()), end='')
+print('\n'.join(line.message for line in PytestImage().check()), end='')
 "
 }
 

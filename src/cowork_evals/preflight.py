@@ -53,9 +53,9 @@ def checks(backend: str, config: Config) -> list[str]:
     reads the same `cowork_evals.yaml`.
     """
     if backend == DOCKER:
-        return [message for _, message in Docker(config).check()]
+        return [line.message for line in Docker(config).check()]
     if backend == TEST:
-        return [message for _, message in PytestImage(config).check()]
+        return [line.message for line in PytestImage(config).check()]
     if backend == COWORK:
         return _cowork(config)
     raise ValueError(f"no preflight for {backend}")

@@ -19,7 +19,7 @@ from cowork_evals import cli, logs, panel, preflight, results
 from cowork_evals.cases import plugin_name, plugin_roots
 from cowork_evals.cli import FAILED, OK, PREFLIGHT_FAILED, USAGE, main, parse_args
 from cowork_evals.config import Config, CoWorkError, EvalSection, checked
-from cowork_evals.docker import Condition, Docker, remedy
+from cowork_evals.docker import Condition, Docker, Image, remedy
 from cowork_evals.docker.pytest_image import PytestImage
 from cowork_evals.harness import RESULT_NAME
 
@@ -980,9 +980,9 @@ def test_a_prune_keeps_the_current_digest_of_each_image() -> None:
     cutoff = datetime(2026, 9, 9)
     old = datetime(2026, 1, 1)
     inventory = [
-        ("cowork-evals:current00000", old),
-        ("cowork-evals-test:current0", old),
-        ("cowork-evals:stale0000000", old),
+        Image("cowork-evals:current00000", old),
+        Image("cowork-evals-test:current0", old),
+        Image("cowork-evals:stale0000000", old),
     ]
     current = {"cowork-evals:current00000", "cowork-evals-test:current0"}
     assert cli._stale(inventory, current, cutoff) == ["cowork-evals:stale0000000"]
@@ -991,8 +991,8 @@ def test_a_prune_keeps_the_current_digest_of_each_image() -> None:
 def test_a_prune_keeps_an_image_built_after_the_cutoff() -> None:
     cutoff = datetime(2026, 9, 9)
     inventory = [
-        ("cowork-evals:young000000", datetime(2026, 9, 9, 0, 0, 1)),
-        ("cowork-evals:old00000000", datetime(2026, 9, 8, 23, 59, 59)),
+        Image("cowork-evals:young000000", datetime(2026, 9, 9, 0, 0, 1)),
+        Image("cowork-evals:old00000000", datetime(2026, 9, 8, 23, 59, 59)),
     ]
     assert cli._stale(inventory, current=set(), cutoff=cutoff) == ["cowork-evals:old00000000"]
 

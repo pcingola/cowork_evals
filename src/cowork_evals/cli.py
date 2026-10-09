@@ -39,7 +39,7 @@ from . import (
 from .cases import CaseError, discover, plugin_name, plugin_roots
 from .config import ABLATION_CHOICES, Config, CoWorkError, CoWorkSection, EvalSection, checked
 from .cowork import CoWork, SessionDocument
-from .docker import Condition, Docker, DockerError, pytest_image, remedy
+from .docker import Condition, Docker, DockerError, Image, pytest_image, remedy
 from .docker.pytest_image import PytestImage
 from .harness import RunOptions
 from .preflight import COWORK, DOCKER, TEST
@@ -1106,9 +1106,9 @@ def _login(args: argparse.Namespace, config: Config) -> int:
         return OK
 
     blocking = [
-        message
-        for condition, message in image.check()
-        if condition in (Condition.DAEMON, Condition.IMAGE)
+        line.message
+        for line in image.check()
+        if line.condition in (Condition.DAEMON, Condition.IMAGE)
     ]
     if blocking:
         return _refuse(blocking, PREFLIGHT_FAILED)
@@ -1309,17 +1309,13 @@ def _prune(args: argparse.Namespace, config: Config) -> int:
     return OK
 
 
-def _stale(
-    inventory: list[tuple[datetime, str]] | list[tuple[str, datetime]],
-    current: set[str],
-    cutoff: datetime,
-) -> list[str]:
+def _stale(inventory: list[Image], current: set[str], cutoff: datetime) -> list[str]:
     """Which tags a prune removes: neither current digest, and built before the cutoff.
 
     Separate from `_prune_images` so the rule is asserted against a hand-written inventory
     rather than against whatever images a machine happens to hold.
     """
-    return [tag for tag, created in inventory if tag not in current and created < cutoff]
+    return [image.tag for image in inventory if image.tag not in current and image.created < cutoff]
 
 
 def _prune_images(config: Config, days: int) -> None:

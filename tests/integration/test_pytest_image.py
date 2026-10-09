@@ -166,8 +166,8 @@ def test_check_reports_an_absent_image_and_never_the_credential(image):
     assert image.check() == [], f"both images are present: {image.tag}"
     absent = PytestImage(Config(docker=DockerSection(claude_code_version="0.0.0-absent")))
     unmet = absent.check()
-    assert [condition for condition, _ in unmet] == [Condition.IMAGE]
-    assert absent.docker.tag in unmet[0][1]
+    assert [line.condition for line in unmet] == [Condition.IMAGE]
+    assert absent.docker.tag in unmet[0].message
 
 
 # What the container is.
