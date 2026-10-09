@@ -130,7 +130,7 @@ def test_with_only_is_always_false() -> None:
 
 
 def test_a_judged_grader_result_carries_its_votes_and_evidence() -> None:
-    judged = result("tone", True, judge_votes=(True, False, True), evidence="Hello Alex.")
+    judged = result("tone", True, judge_votes=[True, False, True], evidence="Hello Alex.")
     entry = Run(graders=(judged,)).document()["graders"][0]
     assert entry["judgeVotes"] == [True, False, True]
     assert entry["evidence"] == "Hello Alex."

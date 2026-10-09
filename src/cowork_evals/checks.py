@@ -46,6 +46,7 @@ from typing import Any
 from . import judge as judging
 from . import results
 from .cases import CHECKS_DIR, Grader, check_files
+from .grader import GraderResult
 from .harness import RESULT_NAME
 from .results import ARM_WITH, ARM_WITHOUT, ARMS, DECLARED_UNRUNNABLE
 from .traces import LAST_MESSAGE_NAME, TRACE_NAME, WORKSPACE_NAME
@@ -521,18 +522,15 @@ def definition(name: str, advisory: bool = False) -> dict[str, Any]:
 
 def grader_result(outcome: Outcome) -> dict[str, Any]:
     """One check's entry in the run's `graders[]`, in the shape every grader result has."""
-    entry: dict[str, Any] = {
-        "name": outcome.name,
-        "passed": outcome.passed,
-        "weight": WEIGHT,
-        "explanation": outcome.explanation,
-        "withOnly": False,
-        "scored": not outcome.skipped and not outcome.advisory,
-    }
-    if outcome.skipped:
-        entry["skipped"] = True
-        entry["skipReason"] = outcome.skip_reason
-    return entry
+    return GraderResult(
+        name=outcome.name,
+        passed=outcome.passed,
+        weight=WEIGHT,
+        explanation=outcome.explanation,
+        scored=not outcome.skipped and not outcome.advisory,
+        skipped=outcome.skipped,
+        skip_reason=outcome.skip_reason if outcome.skipped else None,
+    ).model_dump(mode="json", by_alias=True)
 
 
 def add_spend(entry: dict[str, Any], spent: float, key: str = RUN_SPEND) -> None:

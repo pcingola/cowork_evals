@@ -260,7 +260,7 @@ def test_two_of_three_passes() -> None:
     )
     assert judged.result.passed is True
     assert judged.result.explanation == "judge votes: PASS FAIL PASS"
-    assert judged.result.judge_votes == (True, False, True)
+    assert judged.result.judge_votes == [True, False, True]
     assert judged.result.evidence == "Hello Alex."
     assert judged.cost_usd == pytest.approx(0.0063)
 
@@ -283,7 +283,7 @@ def test_a_lost_vote_is_not_a_pass() -> None:
     )
     assert judged.result.passed is False
     assert judged.result.explanation == "judge votes: PASS LOST LOST"
-    assert judged.result.judge_votes == (True, False, False)
+    assert judged.result.judge_votes == [True, False, False]
 
 
 def test_three_lost_votes_are_a_failed_grader_naming_the_reason() -> None:
@@ -315,7 +315,7 @@ def test_a_reasoned_reply_votes_and_its_reason_reaches_the_grader() -> None:
     replies = [read_reply(reasoned(PASS_WORD, "xlsx.sh dedup ran")) for _ in range(3)]
     judged = tally(grader("llm"), replies, "Hello.")
     assert judged.result.passed is True
-    assert judged.result.judge_votes == (True, True, True)
+    assert judged.result.judge_votes == [True, True, True]
     assert "xlsx.sh dedup ran" in judged.result.explanation
     assert judged.cost_usd == pytest.approx(0.0063)
 

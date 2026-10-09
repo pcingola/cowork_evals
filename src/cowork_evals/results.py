@@ -140,7 +140,7 @@ class Run:
             "error": self.error,
             "skippedPaidGraders": False,
             "cowork": {"sessionDir": self.session_dir, "timeoutSeconds": self.timeout_seconds},
-            "graders": [_grader_result(result) for result in self.graders],
+            "graders": [result.model_dump(mode="json", by_alias=True) for result in self.graders],
         }
         if self.started_at is not None:
             entry["startedAt"] = self.started_at
@@ -323,25 +323,6 @@ def _grader_definition(grader: Grader) -> dict[str, Any]:
         config["criteria"] = grader.markdown
     definition["config"] = config
     return definition
-
-
-def _grader_result(result: GraderResult) -> dict[str, Any]:
-    entry: dict[str, Any] = {
-        "name": result.name,
-        "passed": result.passed,
-        "weight": result.weight,
-        "explanation": result.explanation,
-        "withOnly": False,
-        "scored": not result.skipped,
-    }
-    if result.judge_votes is not None:
-        entry["judgeVotes"] = list(result.judge_votes)
-    if result.evidence is not None:
-        entry["evidence"] = result.evidence
-    if result.skipped:
-        entry["skipped"] = True
-        entry["skipReason"] = result.skip_reason
-    return entry
 
 
 def _plugin(root: Path) -> dict[str, Any]:

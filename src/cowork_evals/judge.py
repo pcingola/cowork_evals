@@ -360,7 +360,7 @@ def tally(grader: Grader, replies: list[Reply], evidence: str) -> Judged:
             passed=passed,
             weight=grader.weight,
             explanation=f"judge votes: {words}" + (f". {said[:REASONING_HEAD]}" if said else ""),
-            judge_votes=tuple(bool(vote) for vote in votes),
+            judge_votes=[bool(vote) for vote in votes],
             evidence=truncate(evidence, EVIDENCE_LIMIT),
         ),
         cost,

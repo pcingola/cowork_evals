@@ -19,6 +19,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
+
 from .cases import (
     FileExistsConfig,
     FileTarget,
@@ -55,23 +64,50 @@ FLAG_MAP = {"i": re.I, "m": re.M, "s": re.S}
 UNICODE_FLAGS = "uv"
 
 
-@dataclass(frozen=True, slots=True)
-class GraderResult:
-    """One grader's verdict. It is what a run's `graders[]` entry is built from.
+class GraderResult(BaseModel):
+    """One grader's verdict: one entry of a run's `graders[]`, read and written.
 
-    `withOnly` is not a field: it is always false here, because `ablation` is `none` and
-    nothing is dropped for an arm. `scored` is `not skipped`, which widens the reference's
-    `scored` = `not withOnly` to the one other exclusion this backend has.
+    `withOnly` is always false from this backend, because `ablation` is `none` and nothing is
+    dropped for an arm; a harness document carries it true. `scored` is `not skipped` unless
+    it is given, which widens the reference's `scored` = `not withOnly` to the one other
+    exclusion this backend has. An optional field that is `None` is absent from the written
+    entry, and `skipped` is written only when true.
     """
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow", frozen=True)
 
     name: str
     passed: bool
     weight: int | float
     explanation: str
-    judge_votes: tuple[bool, ...] | None = None
+    with_only: bool = Field(default=False, alias="withOnly")
+    scored: bool
+    judge_votes: list[bool] | None = Field(default=None, alias="judgeVotes")
     evidence: str | None = None
     skipped: bool = False
-    skip_reason: str | None = None
+    skip_reason: str | None = Field(default=None, alias="skipReason")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _scored(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "scored" not in data:
+            return {**data, "scored": not data.get("skipped", False)}
+        return data
+
+    @model_serializer(mode="wrap")
+    def _absent(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        entry = handler(self)
+        absent = [name for name in _OPTIONAL if getattr(self, name) is None]
+        if not self.skipped:
+            absent.append("skipped")
+        for name in absent:
+            entry.pop(name, None)
+            entry.pop(GraderResult.model_fields[name].alias or name, None)
+        return entry
+
+
+# The fields of a grader result that are absent from the written entry when they are `None`.
+_OPTIONAL = ("judge_votes", "evidence", "skip_reason")
 
 
 @dataclass(frozen=True, slots=True)
