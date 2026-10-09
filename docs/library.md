@@ -178,7 +178,8 @@ them, and this repository's own reader can still find them.
 
 The runtime dependencies are `PyYAML`, which parses `cowork_evals.yaml` and `case.yaml`,
 `python-frontmatter`, which splits a `prompt.md` or a grader file into its `---` block and its
-body, and `packaging`, which normalizes a requirement name. Nothing here writes a parser, a
+body, `packaging`, which normalizes a requirement name, and `pydantic`, which types every
+document this package reads or writes. Nothing here writes a parser, a
 glob engine or an HTTP client.
 
 `requires-python` is a floor, so it also sets the interpreter a consumer's development

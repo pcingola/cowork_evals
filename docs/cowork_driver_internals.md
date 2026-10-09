@@ -23,7 +23,7 @@ The driver is a library and nothing else. It has no entry point, no console scri
 application and reads host paths, and nothing it does belongs to a session. It is therefore
 not bound to 3.10; see [library.md](library.md).
 
-Two modules, and PyYAML.
+Two modules, PyYAML and pydantic.
 
 | Module                | Holds                                                                       |
 | --------------------- | --------------------------------------------------------------------------- |
