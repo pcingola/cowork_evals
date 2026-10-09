@@ -33,6 +33,7 @@ from pydantic import (
     SerializerFunctionWrapHandler,
     ValidationError,
     model_serializer,
+    model_validator,
 )
 
 from .cases import (
@@ -48,7 +49,7 @@ from .cases import (
 from .harness import RESULT_NAME
 from .logs import distribution_version, slug
 from .preflight import BACKENDS, COWORK
-from .results import CaseEntry, PluginRef, ResultDocument, RunEntry, moment
+from .results import CaseEntry, PluginRef, ResultDocument, RunEntry, WrongSchema, moment
 from .traces import DENIED, UNOFFERED
 from .verdict import OUTCOME_DECLARED, OUTCOME_PASS, CaseOutcome, display
 
@@ -151,6 +152,18 @@ class HistoryRecord(_Model):
     denied_tools: list[str] | None = Field(default=None, alias=DENIED)
     unoffered_tools: list[str] | None = Field(default=None, alias=UNOFFERED)
     trace_path: str | None = Field(default=None, alias="tracePath")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _version(cls, data: Any) -> Any:
+        """Another `schemaVersion` fails on its version, before any field is validated."""
+        if isinstance(data, dict):
+            version = data.get("schemaVersion", data.get("schema_version"))
+            if version != SCHEMA_VERSION:
+                raise WrongSchema(
+                    f"schemaVersion is {version!r}, and this module reads {SCHEMA_VERSION}"
+                )
+        return data
 
 
 class Cell(_Model):
@@ -280,31 +293,31 @@ def read(file: Path | str) -> tuple[list[HistoryRecord], list[str]]:
         if not line.strip():
             continue
         try:
-            record = json.loads(line)
-        except ValueError as error:
-            warnings.append(f"{file}: line {number}: unparsable record: {error}")
-            continue
-        if not isinstance(record, dict):
-            warnings.append(f"{file}: line {number}: expected an object")
-            continue
-        if record.get("schemaVersion") != SCHEMA_VERSION:
-            warnings.append(
-                f"{file}: line {number}: schemaVersion is "
-                f"{record.get('schemaVersion')!r}, and this module reads {SCHEMA_VERSION}"
-            )
-            continue
-        try:
-            records.append(HistoryRecord.model_validate(record))
+            records.append(HistoryRecord.model_validate_json(line))
         except ValidationError as error:
-            warnings.append(f"{file}: line {number}: invalid record: {_reason(error)}")
+            warnings.append(f"{file}: line {number}: {_reason(error)}")
     return records, warnings
 
 
 def _reason(error: ValidationError) -> str:
-    """A validation error as one line: each field it names, and what is wrong with it."""
-    return "; ".join(
-        f"{'.'.join(str(part) for part in one['loc'])}: {one['msg']}" for one in error.errors()
+    """Why one line is not a record, as one line.
+
+    A line that is not JSON, a JSON value that is not an object and a record of another
+    `schemaVersion` each say so. Otherwise it names each field and what is wrong with it.
+    """
+    details = error.errors()
+    for detail in details:
+        wrong = (detail.get("ctx") or {}).get("error")
+        if isinstance(wrong, WrongSchema):
+            return str(wrong)
+        if detail["type"] == "json_invalid":
+            return f"unparsable record: {detail['msg']}"
+        if detail["type"] == "model_type":
+            return "expected an object"
+    fields = "; ".join(
+        f"{'.'.join(str(part) for part in one['loc'])}: {one['msg']}" for one in details
     )
+    return f"invalid record: {fields}"
 
 
 def digest(case_dir: Path | str) -> str:

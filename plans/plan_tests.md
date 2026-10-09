@@ -123,7 +123,7 @@ writes exactly the keys and values the module writes today, except where `plan_m
 - [x] `config.py`: `Config.dump(path)`, with `Config.load(path) == config` for every `Config` the tests build.
 - [x] `docker/__init__.py`: `Unmet`, `Image`, `Credentials`, `OAuth`. `preflight.py` and `docker/pytest_image.py` take `Unmet`.
 - [x] `docker/parity.py`: `ProbeDocument`, `Platform`, `OsRelease`, `ToolProbe`, `UnoProbe`. `docker/probe.py` is unchanged.
-- [ ] `cli.py` reads each model above where it reads the record today.
+- [x] `cli.py` reads each model above where it reads the record today.
 
 ## Phase 4: apply the test decisions
 
