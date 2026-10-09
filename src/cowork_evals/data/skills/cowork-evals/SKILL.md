@@ -1,30 +1,43 @@
 ---
 name: cowork-evals
-description: "Two uses of cowork_evals: evals of a CoWork plugin (run) and pytest of its code on the CoWork runtime (test). TRIGGER when: writing or fixing an eval case, grader or check, or a plugin's tests, or running any cowork_evals command."
+description: "Writes and runs CoWork plugin evals, and runs a plugin's pytest suite on the CoWork runtime. TRIGGER when: writing or fixing an eval case, grader, check or plugin test, configuring cowork_evals.yaml, or running cowork_evals. NOT for skill authoring."
 ---
 
 # cowork_evals
 
-`cowork_evals` runs evals against Claude CoWork skills and plugins, and runs a plugin's own
-Python tests on the CoWork runtime. It is installed as a Python package. Evals are written in
-this repository, not in the package.
+`cowork_evals` runs evals of CoWork skills and plugins, and runs a plugin's own pytest suite on
+the CoWork runtime. It is an installed Python package. Evals live in this repository, not in
+the package.
 
-Run `cowork_evals docs` first. It prints the directory holding the shipped documentation and
-every document name. `cowork_evals docs <name>` prints one absolute path, and reading that
-file is the authority for anything below.
+`cowork_evals docs` prints the documentation directory and every document name.
+`cowork_evals docs <name>` prints the path of one document. That document is the authority for
+everything below.
 
-| Question                                | Read                     |
-| --------------------------------------- | ------------------------ |
-| Which cases to write, and which assertion answers what | `docs eval_design`   |
-| How to write a case, field by field     | `docs eval_format`       |
-| Every verb, option and exit code        | `docs cli`               |
-| Which backend proves what, and its cost | `docs approaches`        |
-| Pass and fail, the logs, what a run costs    | `docs running_evals`     |
-| The runtime a plugin's code gets        | `docs runtime`           |
-| `test`, and the runtime a suite gets    | `docs cowork_test`       |
-| An assertion no grader type can express | `docs checks`            |
-| Every grader field the format is silent on | `docs claude_code/plugin_eval_reference` |
-| What `panel` shows, and the records behind it | `docs panel`           |
+| Question                                               | Read                                      |
+| ------------------------------------------------------ | ----------------------------------------- |
+| Which cases to write, and which assertion answers what | `docs eval_design`                        |
+| How to write a case, field by field                    | `docs eval_format`                        |
+| Every verb, option and exit code                       | `docs cli`                                |
+| Which backend proves what, and its cost                | `docs approaches`                         |
+| Pass and fail, the logs, what a run costs              | `docs running_evals`                      |
+| The runtime a plugin's code gets                       | `docs runtime`                            |
+| `test`, and the runtime a suite gets                   | `docs cowork_test`                        |
+| An assertion no grader type can express                | `docs checks`                             |
+| Every grader field the format is silent on             | `docs claude_code/plugin_eval_reference`  |
+| What `panel` shows, and the records behind it          | `docs panel`                              |
+
+## Workflow
+
+1. `cowork_evals check --all`, then `setup --docker` and `login --docker` for what it reports
+   missing.
+2. Write the case: the tree, `prompt.md` and one file per grader, below. Add `checks/` for an
+   assertion no grader type can express.
+3. `cowork_evals run --docker <case> --dry-run`. It validates the tree and spends nothing.
+4. `cowork_evals run --docker <case>`. On a failure, read the kept run, below.
+5. Run the skill's directory, then the plugin's `evals/`.
+6. `--ablation with-without` to show the plugin makes a difference.
+7. `cowork_evals run --cowork <path>` against the real application.
+8. `cowork_evals panel <path>` to find a case that never ran on a backend.
 
 ## The command
 
@@ -41,22 +54,21 @@ cowork_evals init                              # write the config, the skills, a
 cowork_evals prune --docker                    # delete what setup built
 ```
 
-`--docker` runs Claude Code in a container that reproduces the CoWork image. `--cowork` drives
-the real desktop application, needs macOS and a configured profile, and takes the keyboard for
-the length of the run. A modal asks for the keyboard once per invocation, before the first
-plugin; `--dry-run` never shows it. Prefer `--docker` for iteration.
+`--docker` runs Claude Code in a container that reproduces the CoWork image. Use it to iterate.
+`--cowork` drives the real desktop application. It needs macOS and a configured profile, and it
+takes the keyboard for the length of the run. A modal asks for the keyboard once per
+invocation, before the first plugin. `--dry-run` prints what would run, spends nothing, and
+shows no modal.
 
-The path is the scope: a case directory runs that case, `evals/<skill>/` runs that skill,
+The path sets the scope. A case directory runs that case, `evals/<skill>/` runs that skill,
 `evals/` runs the plugin, and a directory holding several plugins runs each in turn.
-`--dry-run` prints what would run and spends nothing.
 
-`panel` takes the same path and spends nothing. It reads records earlier runs left and prints
-one row per case: the latest outcome on each backend, how old it is, and whether the case
-files have changed since. A case that has never run says so, which is how a gap in coverage is
-found without firing anything.
+`panel` takes the same path and spends nothing. It prints one row per case from the records
+earlier runs left: the latest outcome on each backend, its age, and whether the case files
+changed since. A case that never ran says so, which shows a gap in coverage without running
+anything.
 
-`ask` is not an eval and is not part of this skill. It answers a question about what a live
-session does, and the `cowork-ask` skill covers it.
+`ask` is not an eval. The `cowork-ask` skill covers it.
 
 ## The tree
 
@@ -68,13 +80,11 @@ session does, and the `cowork-ask` skill covers it.
 <plugin>/evals/<skill>/<case>/checks/<name>.py  # optional, assertions as Python
 <plugin>/evals/<skill>/<case>/case.yaml   # optional, context.* only
 <plugin>/evals/plugin/<case>/             # a case that crosses skills
-<plugin>/evals/mocks/<server>/<tool>.md   # shared MCP stand-ins
+<plugin>/evals/mocks/<server>/<tool>.md   # MCP tool mocks shared by every case
 ```
 
-A directory directly under `evals/` is a skill name, `plugin`, or `mocks`. Nothing else. The
-validator enforces it in both directions.
-
-Fixtures live inside the case that uses them.
+A directory directly under `evals/` is a skill name, `plugin` or `mocks`, and nothing else. The
+validator enforces this in both directions. Fixtures live inside the case that uses them.
 
 ## prompt.md
 
@@ -92,41 +102,37 @@ runs: 3
 Summarize `notes/standup.md` in one paragraph.
 ```
 
-`tags` and `plugins` are both required and both checked.
-
-- `tags` names the case's own directory. `--tag` is the only reliable per-skill selector.
-  `--case` globs the case name, which is the `name` key when the case writes one.
-- `plugins` counts up to the plugin root. From `evals/<skill>/<case>/` that is `../../..`,
-  and the count is the same whatever the plugin is called.
-
 | Key                                                     | Is                                                    |
 | ------------------------------------------------------- | ----------------------------------------------------- |
 | `name`                                                  | Required                                              |
+| `tags`                                                  | Required. Names the case's own directory              |
+| `plugins`                                               | Required. The relative path up to the plugin root     |
 | `description`                                           | For humans. Not read at run time                      |
-| `tags`, `plugins`                                       | Required, above                                       |
 | `runs`, `max_turns`, `timeout_seconds`                  | Defaults 3, 10, 300. Caps 50, 200, 3600               |
 | `model`, `allowed_tools`, `append_system_prompt`, `env` | Execution. Every `env` key starts with `EVAL_`        |
 
 Any other key is an error. `context.*` goes in `case.yaml`, which needs
 `schema_version: "1.1"` and `name`.
 
+`--tag` is the only reliable per-skill selector. `--case` globs the case name, which is the
+`name` key when the case writes one. From `evals/<skill>/<case>/`, `plugins` is `../../..`
+whatever the plugin is called.
+
 ## The no-cowork tag
 
-`no-cowork` is the one reserved tag value. A case carrying it in `tags:` declares that a live
-CoWork session cannot run it: the case is not submitted on `--cowork`, and is counted rather
-than failed. On `--docker` it is one more tag. `--tag <skill>` still selects the case, because
-the case carries both tags.
+`no-cowork` is the one reserved tag. A case carrying it is not submitted on `--cowork`, and is
+counted, not failed. On `--docker` it is an ordinary tag, and `--tag <skill>` still selects the
+case.
 
-A case carries it when, and only when, it writes `max_turns`, `model`, `allowed_tools`,
+A case carries it if and only if it writes `max_turns`, `model`, `allowed_tools`,
 `append_system_prompt` or `env`, writes any `context.*` key in `case.yaml`, or sits under a
 `mocks/` directory, including a suite-wide `evals/mocks/` several levels above it. The
-validator checks both directions and exits 3 on either: a case that needs the tag and lacks
-it, and a case that carries it and needs nothing. There is no `skip:` field, and the tag is
-not one.
+validator exits 3 on a case that needs the tag and lacks it, and on a case that carries it and
+needs nothing. There is no `skip:` field, and the tag is not one.
 
 ## Graders
 
-One grader per file under `graders/`, frontmatter then the rubric or pattern. Structural
+One grader per file under `graders/`: frontmatter, then the rubric or pattern. Structural
 graders are deterministic. Judged graders call a model. Both decide the exit code. Prefer a
 structural one.
 
@@ -139,9 +145,8 @@ structural one.
 | `llm`         | `criteria`, `focus`. A judge model votes 2 of 3                           | judged     |
 | `baseline`    | `baseline_file`, `criteria`                                               | judged     |
 
-Only `regex` and `llm` choose what they look at, and the keys differ: `regex` uses `target`,
-`llm` uses `focus`. Values are `last_message` (default), `trace`, `files`,
-`{source: file, path}`, `mock_calls`.
+Only `regex` and `llm` choose their input: `regex` with `target`, `llm` with `focus`. The values
+are `last_message` (default), `trace`, `files`, `{source: file, path}` and `mock_calls`.
 
 The skill fired:
 
@@ -178,10 +183,9 @@ max: 0
 
 ## Checks
 
-A grader type cannot say what is inside the file the run wrote. A check can: it is your own
-Python, in the case's `checks/` directory, run on the host after the run is graded, on either
-backend. Its verdict is a grader result in the same document, so a failed check fails
-the run like a failed `regex` grader.
+A check is your own Python in the case's `checks/` directory. It asserts what no grader type
+can, such as the contents of a file the run wrote. It runs on the host after the run is
+graded, on either backend. Its verdict is a grader result, so a failed check fails the run.
 
 ```python
 # evals/<skill>/<case>/checks/assertions.py
@@ -196,8 +200,7 @@ def totals_add_up(run: Run) -> None:
     assert book.active["D10"].value == 4200
 ```
 
-A check that needs a model reads files rather than text, so a PDF, an image and a spreadsheet
-are all judgeable:
+`run.judge` sends files to a model, so a PDF, an image or a spreadsheet can be judged:
 
 ```python
 @check
@@ -206,136 +209,132 @@ def the_deck_is_readable(run: Run) -> Result:
     return run.judge("Every slide carries a title, and no text is clipped.", run.scratch)
 ```
 
-`None` or `True` passes, `False` fails, a `Result` decides, and any exception fails the check
-carrying its message. The name is `<file stem>.<function name>`. `run` carries `workspace`,
-`last_message`, `trace`, `case_dir`, `run_dir`, `scratch` and `index`, plus `file(name)` and
-`judge(prompt, *paths)`. Write into `run.scratch`, never into `run.workspace`.
+`None` or `True` passes, `False` fails, a `Result` decides, and an exception fails the check
+with its message. The check's name is `<file stem>.<function name>`. `run` carries
+`workspace`, `last_message`, `trace`, `case_dir`, `run_dir`, `scratch` and `index`, plus
+`file(name)` and `judge(prompt, *paths)`. Write into `run.scratch`, never into `run.workspace`.
 
-A check runs on the machine you ran `cowork_evals` on, not in the session, so it imports
-whatever your own repository declares. `cowork_evals docs checks` has the rest.
+A check runs on the host, not in the session, so it imports what your own repository declares.
+`cowork_evals docs checks` has the rest.
 
 ## Traps
 
-Each has a silent failure mode.
+Each one fails silently.
 
-- A grader file without `---` delimiters is read as a note and ignored. The case then runs
-  with fewer graders than it appears to have.
-- A prompt that names the skill it is testing measures the name. A CoWork session that does
-  not have the skill refuses the name and produces nothing, so ask for the outcome instead.
-- `max: 0` alone can never pass, because `min` stays 1. A must-not-call assertion is
+- A grader file without `---` delimiters is a note and is ignored. The case runs with fewer
+  graders than it appears to have.
+- A prompt that names the skill under test measures the name. A CoWork session without the
+  skill refuses the name and produces nothing. Ask for the outcome instead.
+- `max: 0` alone never passes, because `min` stays 1. A must-not-call assertion is
   `min: 0, max: 0`.
-- `file_exists` sees only files created during the run. A file the agent modified rather
-  than created is invisible to it. Grade the contents, or assert a `tool_used` on `Edit`.
-- `target` on an `llm` grader is ignored. That key is `focus`, and the grader judges
-  `last_message` while looking as if it judges a file.
-- `llm` graders refuse binaries. A `.pptx` is a ZIP. Render to an image, or write text.
-- `context.add_dirs` refuses any entry outside its own case directory, the eval directory,
-  a sibling case, the plugin root and the case's own `graders/` included.
-- `target: trace` is not portable between backends. Each renders the transcript its own
-  way, so a `regex` over it can pass on one and fail on the other.
-- A case carrying `checks/` and no grader does not load. The harness refuses a case with no
-  grader at all, so `checks/` is added to a case and never replaces its `graders/`.
-- A check reads a collected run, so `--no-keep-traces` gives up every check. Each one is then
-  a skip, and a skip fails the run.
-- A file under `checks/` with no `@check` in it asserts nothing. A helper is a file like any
-  other, so only a `checks/` directory with no check anywhere in it is reported.
-- Each run of a case runs every check again. A case at `runs: 3` carrying one judged check
-  costs three of every judge call it makes.
+- `file_exists` sees only files created during the run, not files the agent modified. Grade
+  the contents, or assert a `tool_used` on `Edit`.
+- `target` on an `llm` grader is ignored. The key is `focus`, and the grader judges
+  `last_message` while it appears to judge a file.
+- `llm` graders refuse binaries. A `.pptx` is a ZIP. Render it to an image, or write text.
+- `context.add_dirs` refuses every entry outside its own case directory: the eval directory, a
+  sibling case, the plugin root and the case's own `graders/`.
+- `target: trace` is not portable. Each backend renders the transcript its own way, so a
+  `regex` over it can pass on one and fail on the other.
+- A case with `checks/` and no grader does not load. The harness refuses a case with no
+  grader, so `checks/` adds to `graders/` and never replaces it.
+- `--no-keep-traces` disables every check, because a check reads the collected run. Each
+  check is then a skip, and a skip fails the run.
+- A file under `checks/` with no `@check` asserts nothing. It is treated as a helper, and only
+  a `checks/` directory with no check in any file is reported.
+- Every run of a case runs every check again. At `runs: 3`, one judged check makes each of its
+  judge calls three times.
 
 ## The exit codes
 
-| Exit | Means                                                            |
-| ---- | ---------------------------------------------------------------- |
-| 0    | the run passed                                                  |
+| Exit | Means                                                                                                                                  |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | the run passed                                                                                                                         |
 | 1    | a grader or a check failed, a case or grader was skipped, a run never had a tool it was granted, or a case's delta was below the threshold |
-| 2    | usage error                                                      |
-| 3    | the preflight failed. Nothing ran, and the message names the fix |
+| 2    | usage error                                                                                                                            |
+| 3    | the preflight failed. Nothing ran, and the message names the fix                                                                       |
 
-`run` validates every selected plugin root before it runs anything, so a malformed sibling
-case blocks a single-case run. There is no option to skip validation. It imports every
-`checks/*.py` while it does, so a check file that will not import exits 3 before anything
-spends.
+`run` validates every selected plugin root and imports every `checks/*.py` before it runs
+anything. A malformed sibling case therefore blocks a single-case run, and a check file that
+does not import exits 3 before anything is spent. Validation cannot be skipped.
 
-`test` is the exception: it returns pytest's exit code unchanged.
+`test` returns pytest's exit code unchanged.
 
-## Did the plugin do anything
+## Ablation
 
-A green suite does not say the plugin works. Ask a model to build a spreadsheet and it will
-probably build one whether or not your spreadsheet plugin is loaded.
+A passing suite does not show that the plugin did anything: a model asked for a spreadsheet
+builds one whether or not a spreadsheet plugin is loaded.
 
 ```bash
 cowork_evals run --docker <path> --ablation with-without
 cowork_evals run --docker <path> --ablation with-without --delta-threshold 0.2
 ```
 
-Every case runs twice, once with the plugin and once with nothing loaded, and each case is
-decided on the delta between the two scores rather than on its score alone. A case below
-`--delta-threshold` fails, and so does a case the two arms cannot be compared on. It costs
-twice as much, it is off by default, and it is `--docker` only: a CoWork session gets its
-skills from the profile the application is running. `eval.ablation` and
-`eval.delta_threshold` set both from the file. `cowork_evals docs running_evals` has what the
-arm changes about pass and fail.
+Every case runs twice, with the plugin and with nothing loaded, and is decided on the delta
+between the two scores. A case below `--delta-threshold` fails, and so does a case the two arms
+cannot be compared on. Ablation doubles the cost, is off by default, and runs on `--docker`
+only, because a CoWork session takes its skills from the application's profile.
+`eval.ablation` and `eval.delta_threshold` set both in the file.
 
-Under the arm a `tool_used: Skill` grader stops being scored in either arm and is reported as
-an indicator, so the one-arm run is still what says the skill fired.
+Under ablation a `tool_used: Skill` grader is not scored in either arm and is reported as an
+indicator. The one-arm run is what shows the skill fired. `cowork_evals docs running_evals` has
+what ablation changes about pass and fail.
 
 ## Reading a failure
 
-Every run leaves its transcript on the host, on either backend and passing runs included, so
-a failure is investigated without running the suite again, against a run that passed and
-against the same case on the other backend. A failing line names the directory:
+Every run leaves its transcript on the host, on both backends, passing runs included. Compare a
+failure against a passing run, or against the same case on the other backend, without running
+the suite again. The failing line names the directory:
 
 ```
 FAIL smoke/one-paragraph: run 2: is-one-paragraph: the regex grader failed: pattern not found
   in last_message [artifacts: logs/evals/<stamp>-smoke/smoke/traces/one-paragraph/run-2]
 ```
 
-| In that directory  | Is                                                                   |
-| ------------------ | -------------------------------------------------------------------- |
-| `last_message.txt` | The final assistant message, which is what a `last_message` grader read |
-| `trace.jsonl`      | Every turn and every tool call, one JSON object per line              |
-| `workspace/`       | The agent's working directory                                         |
-| `scratch/`         | What a check wrote, where the case has checks                        |
+| In that directory  | Is                                                                       |
+| ------------------ | ------------------------------------------------------------------------ |
+| `last_message.txt` | The final assistant message, which a `last_message` grader reads         |
+| `trace.jsonl`      | Every turn and every tool call, one JSON object per line                 |
+| `workspace/`       | The agent's working directory                                            |
+| `scratch/`         | What a check wrote, where the case has checks                            |
 | `checks.jsonl`     | One line per check: the verdict, the traceback, the whole judge exchange |
 
-The three names are the same on `--docker` and `--cowork`. `trace.jsonl` is whatever format
-the backend that produced it wrote, and the two are close but not identical: a harness trace
-ends in a `result` record and a CoWork one does not. `cowork_evals docs running_evals` has the
-table, and it names the document that owns each format. `--no-keep-traces` turns it off, and
-`eval.keep_traces: false` does the same from the file. It also gives up two pass and fail
-conditions, which read the kept trace: a run refused a tool by the permission mode, and a run
-never offered a tool the grant named. Both fail rather than score, because a run that never
-had the tool is not a fact about the plugin. `cowork_evals docs running_evals` has them.
+`last_message.txt`, `trace.jsonl` and `workspace/` have the same names on both backends.
+`trace.jsonl` is in the format of the backend that wrote it. The two formats are close: a
+harness trace ends in a `result` record and a CoWork trace does not.
+`cowork_evals docs running_evals` names the document that owns each format.
+
+`--no-keep-traces`, or `eval.keep_traces: false`, keeps nothing. It also disables the two
+conditions that read the kept trace and fail a run: a tool refused by the permission mode, and
+a granted tool the run was never offered.
 
 ## The runtime under test
 
-A CoWork session is Python 3.10 with a fixed wheel set. Every file under the path passed to
-`cowork_evals run`, meaning each skill, command, agent and hook, imports only what that image
-carries. Read `cowork_evals docs runtime` before adding an import to plugin code.
+A CoWork session is Python 3.10 with a fixed wheel set. Each skill, command, agent and hook
+under the path passed to `cowork_evals run` imports only what that image carries. It reads only
+the environment variables `cowork_evals docs runtime` lists. Every other name is empty in a
+session, and a Docker run gives each `Bash` call the same set, so a skill that reads another
+name fails on both backends. Read `cowork_evals docs runtime` before adding an import.
 
-Code in a session reads only the environment variables `cowork_evals docs runtime` lists, and
-never a `CLAUDE_CODE_*` variable. A session sets no other, so a skill that reads one gets the
-empty string. A Docker run gives a `Bash` call the same set, so that skill fails there too.
-
-A plugin's own pytest suite is the other half, and it is not an eval:
+A plugin's own pytest suite is not an eval:
 
 ```bash
 cowork_evals test --docker <plugin>/tests
 cowork_evals test --docker <plugin>/tests -- -k parser -x
 ```
 
-Every token after `--` reaches pytest in order and unmodified. It runs the suite inside the
-CoWork image with no model, no case tree, no grader and no verdict. That is what says a plugin's
-Python behaves in a session, which a suite passing on a newer local Python does not.
+`test` runs the suite inside the CoWork image with no model, case tree, grader or verdict. It
+shows whether the plugin's Python behaves in a session, which a pass on a newer local Python
+does not. Every token after `--` reaches pytest in order and unchanged.
 
 ## Configuration
 
-`cowork_evals.yaml` in the working directory holds every setting: the driver's, each
-backend's, the models, the tool grants, the ceilings. Nothing is read from the process
-environment except the variables `docker.env_passthrough` names, which are forwarded into the
-run container for a skill that reads a credential from one, and there is no `.env`. A
-command-line option beats the file, and the file beats the built-in default.
+`cowork_evals.yaml` in the working directory holds every setting: the driver's, each backend's,
+the models, the tool grants and the ceilings. The only values read from the process environment
+are the variables `docker.env_passthrough` names. They are forwarded into the run container, for
+a skill that reads a credential from one. There is no `.env`. A command-line option beats the file, and the file beats
+the built-in default.
 
-`cowork_evals init` writes the file with every key and every default. Only the CoWork backend
-requires it: `cowork.profile` is the one key with no default. The file names a profile, which
-is an identifier, so it is not committed.
+`cowork_evals init` writes the file with every key and its default. Only the CoWork backend
+needs the file: `cowork.profile` is the one key with no default. The profile is an identifier,
+so the file is not committed.

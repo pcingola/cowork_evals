@@ -9,7 +9,8 @@ Regex: `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`
 
 ## `description` (required)
 
-This single line decides whether the skill fires. It is the only matching surface.
+The description is the only text matched against a request, so it decides whether the skill
+fires.
 
 Structure:
 
@@ -17,21 +18,23 @@ Structure:
 2. `TRIGGER when:`, concrete user phrases, file extensions, task patterns.
 3. `NOT for ...` where the boundary with a neighbouring skill is fuzzy.
 
-**Must be a literal single line.** Multi-line YAML breaks the parser. This is a hard rule.
+**One literal line.** Multi-line YAML breaks the parser.
 
-**Length is a budget, not a cliff.** Every character is paid in every session by every user, so
-keep it tight, around 250 chars is the target. It is _not_ a limit: descriptions well past 1000
-chars render in full in the loaded skill list, and shipped skills at 349 and 542 chars match fine.
-Past the target, ask what the extra characters buy. Do not treat it as a failure.
+**Quoted.** `TRIGGER when:` puts a colon and a space in the value, which is a parse error in a
+plain YAML scalar. Use single quotes if the text contains `"..."` phrases, double quotes
+otherwise. An unquoted description fails `claude plugin validate --strict` with
+`YAML frontmatter failed to parse`, and the skill loads with every field dropped.
 
-**Front-load the triggers anyway.** `TRIGGER when:` early is good practice regardless of length. A
-capability sentence that buries the trigger list is a real matching problem, because the part of
-the description that matches user phrasing is the part that has to be found. Keep the capability
-sentence tight.
+**Around 250 characters.** Every character is loaded in every session. It is a target, not a
+limit: descriptions past 1000 characters render in full in the loaded skill list, and shipped
+skills at 349 and 542 characters match. Past the target, ask what the extra characters buy.
 
-**Declare the negative case.** At org scale a greedy description hijacks unrelated conversations.
-Where two skills sit next to each other (`pptx` and `pptx-author`, `pdf` and `pdf-redact`),
-state the boundary in the description and record an eval case that must _not_ fire.
+**Triggers early.** The trigger list is the part that matches user phrasing. A long capability
+sentence in front of it hides it.
+
+**The negative case.** A greedy description takes over unrelated conversations. Where two skills
+are adjacent (`pptx` and `pptx-author`, `pdf` and `pdf-redact`), state the boundary in the
+description and record an eval case that must not fire.
 
 Always measure: `echo -n '<description>' | wc -c`
 
@@ -60,33 +63,27 @@ Helps with documents
 
 ### Anti-patterns
 
-- **Missing TRIGGER**, capability alone is not enough. The agent needs matching patterns.
-- **Vague triggers**, "when needed" or "when relevant" do not help matching. Use concrete phrases.
-- **First or second person**, "I can help you" or "Use this skill to" break system prompt context.
-- **Repeating the skill name**, wastes chars. Use the space for trigger keywords instead.
+- No `TRIGGER when:`. A capability alone gives nothing to match.
+- Vague triggers, such as "when needed" or "when relevant". Use concrete phrases.
+- First or second person, such as "I can help you" or "Use this skill to".
+- The skill name repeated. Use the characters for trigger phrases.
 
 ## `version` (optional)
 
-Free-form string at the **top level**, not inside `metadata`. Bumping it is informational, nothing
-compares versions on reload.
-
-Do not confuse it with the plugin's `version`, which lives in `plugin.json`. Those two are
-unrelated fields.
+A free-form string at the top level, not inside `metadata`. Nothing compares versions on
+reload. It is unrelated to the plugin's `version` in `plugin.json`.
 
 ## `allowed-tools`, do not use it
 
-Skills declare `name` and `description` and nothing else. The key takes paths relative to the
-authoring tree, like `Bash(skills/<name>/scripts/<name>.sh:*)`, which do not resolve once the
-skill is installed under `<plugin>/skills/<name>/`. The paths silently point at nothing. Skills
-ported from a source repo carry it. Drop it.
-
-A skill that calls another skill's CLI invokes the wrapper **by path**. It does not need, and must
-not declare, `allowed-tools` to do so.
+The key takes paths relative to the authoring tree, such as
+`Bash(skills/<name>/scripts/<name>.sh:*)`. Once the skill is installed under
+`<plugin>/skills/<name>/` they point at nothing, silently. Skills ported from another repository
+carry it. Drop it. A skill that calls another skill's wrapper calls it by path, with no
+`allowed-tools`.
 
 ## `metadata` (optional)
 
-Arbitrary string-to-string key-value map. Use it for free-form keys like `author` or `date`. Keep
-`version` at the top level, not in here.
+A string-to-string map for free-form keys such as `author` or `date`.
 
 ## Other optional fields
 
@@ -95,6 +92,5 @@ Arbitrary string-to-string key-value map. Use it for free-form keys like `author
   tools or system binaries the skill shells out to, not pip dependencies, with install hints.
   Example: `Requires LibreOffice and Poppler (pdftoppm) for visual-preview and export-pdf.`
 
-Optional keys are tolerated but not enforced: nothing reads them at run time, and
-`claude plugin validate --strict` never opens `SKILL.md` at all, so it will not reject an
-unrecognised skill key either. Set them for the reader's benefit, do not rely on them.
+Nothing reads the optional keys at run time, and `claude plugin validate --strict` checks only
+that the frontmatter parses, so it accepts an unknown key. They are for the human reader.

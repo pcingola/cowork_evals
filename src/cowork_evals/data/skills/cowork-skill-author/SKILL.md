@@ -1,18 +1,17 @@
 ---
 name: cowork-skill-author
-description: 'Authors and reviews Claude CoWork skills and plugins, and checks their code against the CoWork runtime: Python 3.10 and its packages, the installed commands, Node packages and environment variables. TRIGGER when: user says "create a skill", "new skill", "review skill", "check skill", "validate skill", "skill audit", or asks whether plugin code runs in a CoWork session. NOT for writing eval cases, which is cowork-evals.'
+description: 'Authors and reviews CoWork skills and plugins, and checks code against the CoWork runtime. TRIGGER when: "create a skill", "new skill", "review skill", "check skill", "validate skill", "skill audit", or does plugin code run in CoWork. NOT for eval cases.'
 ---
 
 # CoWork skill author
 
-Authors new skills and reviews existing ones against the Agent Skills spec and against the
-CoWork session they run in. A CoWork session is an Ubuntu 22.04 aarch64 VM with Python
-3.10.12, a fixed set of packages and commands, and 16 environment variables. Code in a skill
-uses what is there, and nothing else.
+Authors and reviews skills against the Agent Skills spec and against the CoWork session they
+run in. A CoWork session is an Ubuntu 22.04 aarch64 VM with Python 3.10.12 and a fixed set of
+packages, commands and environment variables. Code in a skill uses what is there, and nothing
+else.
 
-This skill is structural. It scaffolds the plugin and the skill, writes the frontmatter, the
-body and the scripts, and checks them. Writing and running eval cases is the `cowork-evals`
-skill. Asking a live session a question is the `cowork-ask` skill.
+Eval cases are the `cowork-evals` skill. Asking a live session a question is the `cowork-ask`
+skill.
 
 | Reference                   | Holds                                                                |
 | --------------------------- | -------------------------------------------------------------------- |
@@ -34,9 +33,8 @@ cowork_evals test --docker <plugin>/tests     # the plugin's tests, on the sessi
 cowork_evals run --docker <plugin>/evals      # the skills end to end, in the session environment
 ```
 
-`test` runs the Python the tests reach, on the session's interpreter and packages. `run` gives
-every `Bash` call the session's commands and environment variables. Code that neither reaches
-is not checked by either.
+`test` checks the Python the tests reach. `run` checks the commands and variables each `Bash`
+call reaches. Code that neither reaches is not checked.
 
 ## Author a new skill
 
@@ -48,9 +46,8 @@ is not checked by either.
 3. Scaffold the skill directory, `<plugin>/skills/<skill>/`, per `references/structure.md`.
 4. Write `SKILL.md`: frontmatter per `references/frontmatter.md`, body per
    `references/body.md`.
-5. If the skill has scripts, write the wrapper and the package per `references/cli.md`, and
-   keep every import, command and variable within `references/runtime.md`. Nothing installs
-   at run time.
+5. If the skill has scripts, write the wrapper and the package per `references/cli.md`. Keep
+   every import, command and variable within `references/runtime.md`.
 6. If the skill carries code, write its tests in `<plugin>/tests/` and run them with
    `cowork_evals test --docker <plugin>/tests`.
 7. Write the eval cases in `<plugin>/evals/<skill>/`: at least a case where the skill fires
@@ -62,20 +59,17 @@ is not checked by either.
 1. Identify the target: a skill name, or every skill in the plugin.
 2. Locate the plugin shell: the `.claude-plugin/plugin.json` above the skill, the plugin's
    `tests/`, and `evals/<skill>/`. A skill under no plugin cannot be installed.
-3. Run `references/checklist.md`, every applicable item, A to H. Read the files. Items outside
-   the skill directory, the tests, the evals and the manifest, are the ones a listing of the
-   skill does not show.
+3. Run every applicable item of `references/checklist.md`, A to H. Read the files, including
+   the manifest, the tests and the evals, which sit outside the skill directory.
 4. Run `cowork_evals test --docker <plugin>/tests`.
-5. Report a pass and fail table by section. For each failure, state what is wrong and the
-   fix. Report warnings apart from failures: a warning is a question, not a defect.
+5. Report a pass and fail table by section, with the defect and the fix for each failure.
+   Report warnings apart from failures.
 6. Apply the fixes the user asks for, then run the checklist and the tests again.
 
 ## Rules
 
 - The Agent Skills spec is https://agentskills.io/specification.
-- Measure the description: `echo -n '<description>' | wc -c`.
-- For a skill with scripts, run the wrapper: `<wrapper> --help` exits 0.
 - `claude plugin validate <plugin> --strict` checks the manifests and that each `SKILL.md`
-  frontmatter parses. It reads no frontmatter field and nothing outside the manifests.
+  frontmatter parses. It reads no frontmatter field, so a clean validate proves nothing else.
 - When a question about the session is still open, `cowork_evals ask --cowork` settles it:
   ask the session to run the import or the command, and read what it did.

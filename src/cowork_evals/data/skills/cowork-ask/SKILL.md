@@ -1,6 +1,6 @@
 ---
 name: cowork-ask
-description: Answer a question about what a real Claude CoWork session does by submitting one prompt to one with cowork_evals ask. TRIGGER when a question is about what a live CoWork session actually does, when a claim about the product has to be confirmed rather than argued, or when a cowork_evals ask command fails.
+description: "Answers what a live CoWork session does by submitting one prompt with cowork_evals ask. TRIGGER when: a claim about CoWork must be confirmed in the product, not argued, or cowork_evals ask fails. NOT for evals."
 ---
 
 # cowork_evals ask
@@ -12,8 +12,8 @@ and no run directory.
 Use it when the answer is a fact about the deployed product. Do not use it to check anything
 a file already states, and do not use it in place of `cowork_evals run`.
 
-Run `cowork_evals docs` for the documentation this command ships. Every rule below is in one
-of those files, and the name in the right column is the file that owns it.
+`cowork_evals docs` prints the shipped documentation. Every rule below is in one of those
+files, and the right column names the file that owns it.
 
 | Question                                       | Read                   |
 | ---------------------------------------------- | ---------------------- |
@@ -22,6 +22,15 @@ of those files, and the name in the right column is the file that owns it.
 | What the application writes, and where         | `docs cowork_desktop`  |
 | What the CoWork backend can and cannot honour  | `docs approaches`      |
 | What a session may import                      | `docs runtime`         |
+
+## Steps
+
+1. Confirm no file states the answer: `cowork_evals docs`, then the document that owns it.
+2. Write a prompt that makes the session do the thing, per the table below.
+3. `cowork_evals ask --cowork --dry-run "<prompt>"` when the prompt is long or built by hand.
+4. `cowork_evals ask --cowork "<prompt>"`, once.
+5. Read what the session did: `outputs`, `tools`, or `tool_calls` under `--json`.
+6. Re-read with `--session <dir>`, never by asking again.
 
 ## The command
 
@@ -37,15 +46,15 @@ outputs and the driver log are stderr, so a redirect captures the answer alone.
 
 ## What it costs
 
-One ask costs a VM boot, the keyboard for the length of the run because the submission is a
-synthetic Return to the frontmost window, and one submission against `cowork.max_runs`.
+One ask costs a VM boot, one submission against `cowork.max_runs`, and the keyboard for the
+length of the run, because the submission is a synthetic Return to the frontmost window.
 
-Ask once. `--dry-run` first when the prompt is long or built by hand, and `--session` to
-re-read a session already on disk instead of submitting it again.
+Ask once. Use `--dry-run` first when the prompt is long or built by hand. Use `--session` to
+re-read a session already on disk instead of submitting again.
 
-## The one rule that makes an answer evidence
+## Ask it to act, and read what it did
 
-Ask the session to **do** the thing, and read what it did. What a session says about its own
+Ask the session to do the thing, and read what it did. What a session says about its own
 configuration is not evidence: a model reports its tools, its permissions and its environment
 from its prompt and from habit, and both go stale.
 

@@ -1,9 +1,7 @@
-# Directory Structure
+# Directory structure
 
-A skill is a directory holding a `SKILL.md`, and it lives inside a plugin. The plugin is what
-ships and what a user installs, so a skill that sits under no plugin cannot be installed at all.
-
-There is one shape. It is the tree below.
+A skill is a directory holding a `SKILL.md`, inside a plugin. The plugin is what a user
+installs, so a skill under no plugin cannot be installed. There is one shape, the tree below.
 
 ## The plugin
 
@@ -28,15 +26,14 @@ There is one shape. It is the tree below.
 └── evals/<skill>/<case>/      # one eval directory per skill
 ```
 
-Four properties of this tree, each of which is a way to get it wrong:
+Four properties of this tree:
 
 - **No `pyproject.toml`, no `uv.lock`, no `.venv`, no `Dockerfile`.** Nothing is installed when a
   skill runs, so there is no project to declare and no environment to build. A dependency is
   either already on the image or bundled in the plugin as source. See `runtime.md`.
 - **`tests/` and `evals/` belong to the plugin, not to the skill.** A module is shared across a
-  plugin's skills, and one eval directory per skill is what makes a per-skill selection match the
-  tree. The consequence when reviewing: listing the skill directory does **not** show its tests or
-  its evals, so a skill can look complete and have neither.
+  plugin's skills, and one eval directory per skill makes a per-skill selection match the tree.
+  A listing of the skill directory shows neither, so a skill can look complete and have neither.
 - **The wrapper resolves its own directory.** A skill's `scripts/<skill>.sh` derives its paths
   from `$0` and never from an environment variable that may be unset. See `cli.md`.
 - **A skill never links outside its own directory.** The skill is read where it is installed. A
@@ -52,18 +49,12 @@ An orchestration skill is only installable when the skill it drives is in the sa
 the plugin declares the other one as a dependency. A wrapper reached across plugins breaks the
 moment one of the two is installed alone.
 
-## Tier-3 directories
+## On-demand directories
 
-`references/`, `resources/` and `assets/` are all progressive-disclosure tier-3 directories,
-loaded only when read:
-
-- `references/`, markdown docs the agent reads when the `SKILL.md` body links to them, for example
-  `references/classification_rules.md`.
-- `resources/`, supplemental reference material.
-- `assets/`, binary templates, images, sample data (pptx templates, fonts).
-
-Keep anything brand- or org-specific in `assets/`, so a fork elsewhere swaps assets and nothing
-else.
+`references/`, `resources/` and `assets/` load only when read. `references/` holds markdown the
+`SKILL.md` body links to. `resources/` holds supplemental reference material. `assets/` holds
+binary templates, images, fonts and sample data. Anything brand- or organisation-specific goes in
+`assets/`, so a fork swaps assets and nothing else.
 
 ## Naming
 
