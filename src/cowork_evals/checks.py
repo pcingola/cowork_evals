@@ -277,7 +277,7 @@ def _judge_grader(prompt: str) -> Grader:
         name=JUDGE_GRADER,
         type=CHECK_TYPE,
         weight=WEIGHT,
-        config={},
+        config=None,
         markdown=prompt,
         path=Path(CHECKS_DIR),
     )

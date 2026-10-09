@@ -56,8 +56,8 @@ def recorded(name: str) -> str:
 
 
 def grader(kind: str, markdown: str = "", name: str = "j", **config: Any) -> Grader:
-    return Grader(
-        name=name, type=kind, weight=1, config=config, markdown=markdown, path=CASE / f"{name}.md"
+    return Grader.build(
+        name=name, type=kind, weight=1, keys=config, markdown=markdown, path=CASE / f"{name}.md"
     )
 
 

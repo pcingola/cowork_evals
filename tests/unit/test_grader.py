@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from cowork_evals.cases import Grader
+from cowork_evals.cases import FileTarget, Grader
 from cowork_evals.grader import _full_match, created, grade, resolve_target
 
 DATA = Path(__file__).resolve().parent.parent / "data" / "documents"
@@ -41,8 +41,8 @@ def quiet() -> dict[str, Any]:
 
 
 def grader(kind: str, name: str = "g", weight: int | float = 1, **config: Any) -> Grader:
-    return Grader(
-        name=name, type=kind, weight=weight, config=config, markdown="", path=Path(f"{name}.md")
+    return Grader.build(
+        name=name, type=kind, weight=weight, keys=config, markdown="", path=Path(f"{name}.md")
     )
 
 
@@ -71,19 +71,19 @@ def test_files_is_the_stripped_list_newline_separated(answered: dict[str, Any]) 
 
 
 def test_a_file_target_reads_under_outputs(answered: dict[str, Any]) -> None:
-    target = resolve_target(answered, {"source": "file", "path": "report.md"})
+    target = resolve_target(answered, FileTarget(source="file", path="report.md"))
     assert target.error is None
     assert target.text == "# Report\n\n- One bullet about the migration.\n"
 
 
 def test_an_unreadable_file_is_a_reason_and_never_a_raise(answered: dict[str, Any]) -> None:
-    target = resolve_target(answered, {"source": "file", "path": "absent.md"})
+    target = resolve_target(answered, FileTarget(source="file", path="absent.md"))
     assert target.error is not None
     assert "absent.md" in target.error
 
 
 def test_a_path_escaping_outputs_is_refused(answered: dict[str, Any]) -> None:
-    target = resolve_target(answered, {"source": "file", "path": "../audit.jsonl"})
+    target = resolve_target(answered, FileTarget(source="file", path="../audit.jsonl"))
     assert target.error == "../audit.jsonl resolves outside outputs/"
 
 

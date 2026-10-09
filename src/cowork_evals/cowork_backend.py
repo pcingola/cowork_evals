@@ -7,8 +7,7 @@ prompt through `CoWork`, grades the session document, and writes the same
 What this backend cannot run is docs/eval_format.md: a case asking for something a live session
 does not offer carries the `no-cowork` tag, submits nothing here and is counted rather than
 failed. It reads the tag and decides no case skip of its own. A key the case left to its default
-is not a request, which is why this reads `Case.frontmatter_keys` and `Case.case_yaml_keys` and
-never a merged value.
+is not a request, which is why this reads which keys a case wrote and never a merged value.
 """
 
 from __future__ import annotations
@@ -101,7 +100,7 @@ def grader_skips(case: Case) -> dict[str, str]:
     skipped = {}
     for grader in case.graders:
         for key in ("target", "focus"):
-            if grader.config.get(key) == MOCK_CALLS:
+            if getattr(grader.config, key, None) == MOCK_CALLS:
                 skipped[grader.name] = f"{key}: {MOCK_CALLS}, and no stand-in serves a CoWork run"
                 break
     return skipped
@@ -364,16 +363,12 @@ def _one_plugin_root(target: Path | str) -> Path:
 def _effective_runs(case: Case, override: int | None) -> int:
     if override is not None:
         return override
-    declared = case.frontmatter_keys.get("runs")
-    if isinstance(declared, int) and not isinstance(declared, bool):
-        return declared
-    return DEFAULT_RUNS
+    declared = case.frontmatter.runs
+    return DEFAULT_RUNS if declared is None else declared
 
 
 def _effective_timeout(case: Case, override: float | None, configured: float) -> float:
     if override is not None:
         return float(override)
-    declared = case.frontmatter_keys.get("timeout_seconds")
-    if isinstance(declared, int | float) and not isinstance(declared, bool):
-        return float(declared)
-    return float(configured)
+    declared = case.frontmatter.timeout_seconds
+    return float(configured) if declared is None else declared

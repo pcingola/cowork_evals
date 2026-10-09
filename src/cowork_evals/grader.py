@@ -19,7 +19,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .cases import Grader
+from .cases import (
+    FileExistsConfig,
+    FileTarget,
+    Grader,
+    RegexConfig,
+    ToolOrderConfig,
+    ToolSpec,
+    ToolUsedConfig,
+)
 
 # The grader types this module answers for. `llm` and `baseline` are judge.py's.
 STRUCTURAL = ("regex", "tool_used", "tool_order", "file_exists")
@@ -35,7 +43,6 @@ OUTPUTS = "outputs"
 LAST_MESSAGE = "last_message"
 TRACE = "trace"
 FILES = "files"
-FILE_SOURCE = "file"
 
 # `match` on a regex grader.
 CONTAINS = "contains"
@@ -94,18 +101,19 @@ def failed(grader: Grader, explanation: str) -> GraderResult:
 
 
 def grade(grader: Grader, document: dict[str, Any]) -> GraderResult:
-    """One structural grader. An unknown type is a failed grader naming it."""
-    match grader.type:
-        case "regex":
-            return _regex(grader, document)
-        case "tool_used":
-            return _tool_used(grader, document)
-        case "tool_order":
-            return _tool_order(grader, document)
-        case "file_exists":
-            return _file_exists(grader, document)
-        case _:
-            return failed(grader, f"unknown grader type: {grader.type or '(none)'}")
+    """One structural grader. An unknown type, or a config that does not validate, fails it."""
+    if grader.config_error is not None:
+        return failed(grader, f"invalid config: {grader.config_error}")
+    config = grader.config
+    if isinstance(config, RegexConfig):
+        return _regex(grader, config, document)
+    if isinstance(config, ToolUsedConfig):
+        return _tool_used(grader, config, document)
+    if isinstance(config, ToolOrderConfig):
+        return _tool_order(grader, config, document)
+    if isinstance(config, FileExistsConfig):
+        return _file_exists(grader, config, document)
+    return failed(grader, f"unknown grader type: {grader.type or '(none)'}")
 
 
 # The targets.
@@ -118,7 +126,7 @@ def created(document: dict[str, Any]) -> list[str]:
     return [entry[len(prefix) :] if entry.startswith(prefix) else entry for entry in entries]
 
 
-def resolve_target(document: dict[str, Any], spec: Any) -> Target:
+def resolve_target(document: dict[str, Any], spec: str | FileTarget | None) -> Target:
     """What a `target` or a `focus` names, as text.
 
     It is text every time: a regex and a judge both read text, and the reference makes
@@ -131,8 +139,8 @@ def resolve_target(document: dict[str, Any], spec: Any) -> Target:
         return Target(text=_trace(document))
     if spec == FILES:
         return Target(text="\n".join(created(document)))
-    if isinstance(spec, dict) and spec.get("source") == FILE_SOURCE:
-        return _produced_file(document, spec.get("path"))
+    if isinstance(spec, FileTarget):
+        return _produced_file(document, spec.path)
     return Target(error=f"unknown target: {spec!r}")
 
 
@@ -194,24 +202,24 @@ def compile_pattern(pattern: Any, flags: Any = "") -> re.Pattern[str]:
 # The four graders.
 
 
-def _regex(grader: Grader, document: dict[str, Any]) -> GraderResult:
-    pattern = grader.config.get("pattern")
+def _regex(grader: Grader, config: RegexConfig, document: dict[str, Any]) -> GraderResult:
+    pattern = config.pattern
     if pattern is None:
         return failed(grader, "regex grader has no pattern")
     try:
-        compiled = compile_pattern(pattern, grader.config.get("flags", ""))
+        compiled = compile_pattern(pattern, config.flags)
     except re.error as error:
         return failed(grader, f"pattern does not compile: {error}")
 
-    target = resolve_target(document, grader.config.get("target"))
+    target = resolve_target(document, config.target)
     if target.error is not None:
         return failed(grader, target.error)
 
     hits = len(compiled.findall(target.text))
-    match = grader.config.get("match", CONTAINS)
+    match = config.match
     if match == NOT_CONTAINS:
         return _verdict(grader, hits == 0, f"no match for {pattern}", f"matched {pattern}")
-    if isinstance(match, str) and match.startswith(COUNT_PREFIX):
+    if match.startswith(COUNT_PREFIX):
         wanted = match[len(COUNT_PREFIX) :]
         if not wanted.isdigit():
             return failed(grader, f"unreadable match: {match}")
@@ -227,17 +235,17 @@ def _regex(grader: Grader, document: dict[str, Any]) -> GraderResult:
     return _verdict(grader, hits > 0, f"matched {pattern}", f"no match for {pattern}")
 
 
-def _tool_used(grader: Grader, document: dict[str, Any]) -> GraderResult:
-    tool = grader.config.get("tool")
-    if not isinstance(tool, str):
+def _tool_used(grader: Grader, config: ToolUsedConfig, document: dict[str, Any]) -> GraderResult:
+    tool = config.tool
+    if tool is None:
         return failed(grader, "tool_used grader has no tool")
     try:
-        calls = _matching_calls(document, tool, grader.config.get("input_match"))
+        calls = _matching_calls(document, tool, config.input_match)
     except re.error as error:
         return failed(grader, f"input_match does not compile: {error}")
 
-    low = grader.config.get("min", 1)
-    high = grader.config.get("max")
+    low = config.min
+    high = config.max
     count = len(calls)
     within = count >= low and (high is None or count <= high)
     return GraderResult(
@@ -248,22 +256,24 @@ def _tool_used(grader: Grader, document: dict[str, Any]) -> GraderResult:
     )
 
 
-def _tool_order(grader: Grader, document: dict[str, Any]) -> GraderResult:
+def _tool_order(grader: Grader, config: ToolOrderConfig, document: dict[str, Any]) -> GraderResult:
     """`before` and `after`, each a tool name or `{tool, input_match}`.
 
     It reads `tool_calls` and not `tool_names`, because of the object form: a name alone
     cannot carry an `input_match`.
     """
     try:
-        first = {key: _first_index(document, grader.config.get(key)) for key in ("before", "after")}
+        before = _first_index(document, config.before)
+        after = _first_index(document, config.after)
     except re.error as error:
         return failed(grader, f"input_match does not compile: {error}")
 
-    names = {key: _spec_name(grader.config.get(key)) for key in ("before", "after")}
-    for key in ("before", "after"):
-        if first[key] is None:
-            return failed(grader, f"{names[key]} was never called")
-    passed = first["before"] < first["after"]
+    names = {"before": _spec_name(config.before), "after": _spec_name(config.after)}
+    if before is None:
+        return failed(grader, f"{names['before']} was never called")
+    if after is None:
+        return failed(grader, f"{names['after']} was never called")
+    passed = before < after
     return _verdict(
         grader,
         passed,
@@ -317,16 +327,18 @@ def _glob_segment(segment: str) -> str:
     return "".join(out)
 
 
-def _file_exists(grader: Grader, document: dict[str, Any]) -> GraderResult:
+def _file_exists(
+    grader: Grader, config: FileExistsConfig, document: dict[str, Any]
+) -> GraderResult:
     """`path` as a glob over the produced files, with the harness's glob semantics.
 
     `**/` is any depth and `*` is within a segment, which is what the reference defines.
     `_full_match` is that comparison.
     """
-    path = grader.config.get("path")
-    if not isinstance(path, str) or not path:
+    path = config.path
+    if not path:
         return failed(grader, "file_exists grader has no path")
-    wants = grader.config.get("exists", True)
+    wants = config.exists
     matched = next((entry for entry in created(document) if _full_match(entry, path)), None)
     hit = f"created {matched}"
     miss = f"no created file matches {path}"
@@ -352,7 +364,7 @@ def _verdict(grader: Grader, passed: bool, when_passed: str, when_failed: str) -
     )
 
 
-def _matching_calls(document: dict[str, Any], tool: str, input_match: Any) -> list[int]:
+def _matching_calls(document: dict[str, Any], tool: str, input_match: str | None) -> list[int]:
     """The index of every call of `tool` whose JSON-encoded input matches, in call order."""
     compiled = None if input_match is None else compile_pattern(input_match)
     found = []
@@ -365,22 +377,20 @@ def _matching_calls(document: dict[str, Any], tool: str, input_match: Any) -> li
     return found
 
 
-def _first_index(document: dict[str, Any], spec: Any) -> int | None:
+def _first_index(document: dict[str, Any], spec: str | ToolSpec | None) -> int | None:
     """The first call matching a `tool_order` end, as an index into `tool_calls`."""
-    if isinstance(spec, dict):
-        tool = spec.get("tool")
-        input_match = spec.get("input_match")
-    else:
-        tool, input_match = spec, None
-    if not isinstance(tool, str):
+    if spec is None:
         return None
-    calls = _matching_calls(document, tool, input_match)
+    if isinstance(spec, ToolSpec):
+        calls = _matching_calls(document, spec.tool, spec.input_match)
+    else:
+        calls = _matching_calls(document, spec, None)
     return calls[0] if calls else None
 
 
-def _spec_name(spec: Any) -> str:
-    if isinstance(spec, dict):
-        return str(spec.get("tool"))
+def _spec_name(spec: str | ToolSpec | None) -> str:
+    if isinstance(spec, ToolSpec):
+        return spec.tool
     return str(spec)
 
 

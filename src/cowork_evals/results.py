@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .cases import JUDGED, PLUGIN_MANIFEST, Case, Grader, plugin_name
+from .cases import JUDGED, Case, Grader, plugin_manifest, plugin_name
 from .grader import GraderResult
 from .harness import RESULT_NAME
 
@@ -43,16 +43,6 @@ THRESHOLD = 0
 # What `claude --version` says when it cannot be asked. The `--cowork` preflight is what
 # keeps that from happening; a suite that ran anyway says so rather than claiming a version.
 UNKNOWN_VERSION = "unknown"
-
-# The defaults `grader.py` applies while grading, filled into a grader definition's `config`
-# so the document says what was actually asserted. `Grader.config` is the authored keys
-# alone, which is why the filling in happens here.
-GRADER_DEFAULTS: dict[str, dict[str, Any]] = {
-    "regex": {"target": "last_message", "flags": "", "match": "contains"},
-    "tool_used": {"min": 1},
-    "file_exists": {"exists": True},
-    "llm": {"focus": "last_message"},
-}
 
 # The case keys the document records as declared, and their camelCase names. They are the
 # case's own values and never an override: what actually ran is read from `arms.with` and
@@ -195,9 +185,10 @@ class CaseResult:
             "source": self.case.source,
             "promptMarkdown": self.case.prompt,
         }
+        declared = self.case.frontmatter
         for key, camel in DECLARED_KEYS.items():
-            if key in self.case.frontmatter_keys:
-                entry[camel] = self.case.frontmatter_keys[key]
+            if key in declared.model_fields_set:
+                entry[camel] = getattr(declared, key)
         entry["graders"] = [_grader_definition(grader) for grader in self.case.graders]
         entry["arms"] = {ARM_WITH: [run.document() for run in self.runs]}
         entry["aggregates"] = {"score": self.score, "passRate": self.pass_rate}
@@ -323,7 +314,11 @@ def _grader_definition(grader: Grader) -> dict[str, Any]:
     }
     if grader.type in JUDGED:
         definition["graderMarkdown"] = grader.markdown
-    config = {**GRADER_DEFAULTS.get(grader.type, {}), **grader.config}
+    # The typed config carries the defaults the grader applies, so the document says what was
+    # actually asserted. A grader with no config writes an empty mapping.
+    config = (
+        {} if grader.config is None else grader.config.model_dump(mode="json", exclude_none=True)
+    )
     if grader.type in JUDGED and "criteria" not in config:
         config["criteria"] = grader.markdown
     definition["config"] = config
@@ -352,15 +347,9 @@ def _grader_result(result: GraderResult) -> dict[str, Any]:
 def _plugin(root: Path) -> dict[str, Any]:
     """The plugin under test, from its manifest. `cases.plugin_name` decides the name."""
     entry: dict[str, Any] = {"name": plugin_name(root), "path": str(root)}
-    try:
-        manifest = json.loads((root / PLUGIN_MANIFEST).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return entry
-    if not isinstance(manifest, dict):
-        return entry
-    version_named = manifest.get("version")
-    if isinstance(version_named, str) and version_named:
-        entry["version"] = version_named
+    version = plugin_manifest(root).version
+    if version:
+        entry["version"] = version
     return entry
 
 

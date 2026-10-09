@@ -10,7 +10,15 @@ from pathlib import Path
 
 import pytest
 
-from cowork_evals.cases import Case, CaseError, discover, plugin_root, read
+from cowork_evals.cases import (
+    Case,
+    CaseError,
+    LlmGraderConfig,
+    RegexConfig,
+    discover,
+    plugin_root,
+    read,
+)
 
 ROOT = Path(__file__).resolve().parent.parent / "data" / "cases"
 TREE = ROOT / "tree"
@@ -123,14 +131,14 @@ def test_a_grader_carries_its_split_frontmatter_and_its_body() -> None:
     regex = graders["mentions-alex"]
     assert regex.type == "regex"
     assert regex.weight == 2
-    assert regex.config == {"target": "last_message", "pattern": "Alex", "match": "contains"}
+    assert regex.config == RegexConfig(target="last_message", pattern="Alex", match="contains")
     assert regex.markdown == ""
     assert regex.path.name == "mentions-alex.md"
 
     judged = graders["tone"]
     assert judged.type == "llm"
     assert judged.weight == 1, "the default weight"
-    assert judged.config == {"focus": "last_message"}
+    assert judged.config == LlmGraderConfig(focus="last_message")
     assert judged.markdown == "The reply is warm and personal."
 
 

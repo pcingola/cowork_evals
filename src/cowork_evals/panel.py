@@ -27,7 +27,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .cases import CASE_YAML, EVAL_DIR, GRADERS_DIR, PROMPT_FILE, Case, check_files, plugin_name
+from .cases import (
+    CASE_YAML,
+    EVAL_DIR,
+    GRADERS_DIR,
+    PROMPT_FILE,
+    Case,
+    CaseError,
+    check_files,
+    plugin_name,
+)
 from .harness import RESULT_NAME
 from .logs import distribution_version, slug
 from .preflight import BACKENDS, COWORK
@@ -517,11 +526,16 @@ def _row(
     cells = {backend: _cell(backend, latest[backend], case) for backend in BACKENDS}
     record = _most_recent(latest.values())
     backend = str(record.get("backend")) if record else ""
+    try:
+        description = case.frontmatter.description or ""
+    except CaseError as error:
+        warnings.append(str(error))
+        description = ""
     return Row(
         plugin=plugin,
         skill=_skill(where) or "",
         case=case.name,
-        description=str(case.frontmatter_keys.get("description") or ""),
+        description=description,
         dir=where,
         cells=cells,
         score=_number((record or {}).get("score")),

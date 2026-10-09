@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from cowork_evals.cases import Case, Grader, read
+from cowork_evals.cases import Case, Grader, ToolUsedConfig, read
 from cowork_evals.grader import GraderResult
 from cowork_evals.harness import RESULT_NAME
 from cowork_evals.results import CaseResult, Run, build, write
@@ -335,7 +335,7 @@ def test_a_grader_definition_needs_no_case_on_disk() -> None:
         name="no-web",
         type="tool_used",
         weight=1,
-        config={"tool": "WebFetch", "min": 0, "max": 0},
+        config=ToolUsedConfig(tool="WebFetch", min=0, max=0),
         markdown="",
         path=Path("no-web.md"),
     )

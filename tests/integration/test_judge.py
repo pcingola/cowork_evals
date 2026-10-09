@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from cowork_evals.cases import Grader
+from cowork_evals.cases import Grader, LlmGraderConfig
 from cowork_evals.checks import build_run
 from cowork_evals.judge import grade, resolve_model
 
@@ -29,7 +29,7 @@ def rubric_grader() -> Grader:
         name="is-pong",
         type="llm",
         weight=1,
-        config={"focus": "last_message"},
+        config=LlmGraderConfig(focus="last_message"),
         markdown=RUBRIC,
         path=Path("is-pong.md"),
     )

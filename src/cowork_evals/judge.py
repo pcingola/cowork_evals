@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .cases import Grader
+from .cases import BaselineGraderConfig, FileTarget, Grader, LlmGraderConfig
 from .config import Config
 from .grader import GraderResult, failed, produced_file, resolve_target, skipped
 
@@ -191,8 +191,10 @@ def compose_paths(prompt: str, names: tuple[str, ...]) -> str:
 
 def criteria(grader: Grader) -> str:
     """The rubric: the `criteria:` key where one is written, and the body otherwise."""
-    written = grader.config.get("criteria")
-    if isinstance(written, str) and written.strip():
+    config = grader.config
+    judged = isinstance(config, LlmGraderConfig | BaselineGraderConfig)
+    written = config.criteria if judged else None
+    if written is not None and written.strip():
         return written
     return grader.markdown
 
@@ -228,21 +230,26 @@ def material(grader: Grader, document: dict[str, Any], case_dir: Path) -> Materi
     it. A `baseline` grader reads `baseline_file` beside the case and shows both
     trajectories.
     """
-    if grader.type == "baseline":
-        return _baseline_material(grader, document, case_dir)
+    config = grader.config
+    if isinstance(config, BaselineGraderConfig):
+        return _baseline_material(config, document, case_dir)
+    if not isinstance(config, LlmGraderConfig):
+        return Material(error=f"unknown grader type: {grader.type or '(none)'}")
 
-    focus = grader.config.get("focus")
-    if isinstance(focus, dict) and focus.get("source") == "file":
-        return _file_material(document, focus.get("path"))
+    focus = config.focus
+    if isinstance(focus, FileTarget):
+        return _file_material(document, focus.path)
     resolved = resolve_target(document, focus)
     if resolved.error is not None:
         return Material(error=resolved.error)
     return Material(text=resolved.text)
 
 
-def _baseline_material(grader: Grader, document: dict[str, Any], case_dir: Path) -> Material:
-    named = grader.config.get("baseline_file")
-    if not isinstance(named, str) or not named:
+def _baseline_material(
+    config: BaselineGraderConfig, document: dict[str, Any], case_dir: Path
+) -> Material:
+    named = config.baseline_file
+    if not named:
         return Material(error="baseline grader has no baseline_file")
     root = Path(case_dir).resolve()
     path = (root / named).resolve()
@@ -259,7 +266,7 @@ def _baseline_material(grader: Grader, document: dict[str, Any], case_dir: Path)
     return Material(text="\n".join([BASELINE_HEADING, text, "", NEW_HEADING, trajectory.text]))
 
 
-def _file_material(document: dict[str, Any], path: Any) -> Material:
+def _file_material(document: dict[str, Any], path: str) -> Material:
     named, error = produced_file(document, path)
     if named is None:
         return Material(error=error)
@@ -361,7 +368,12 @@ def tally(grader: Grader, replies: list[Reply], evidence: str) -> Judged:
 
 
 def grade(grader: Grader, document: dict[str, Any], case_dir: Path | str, *, model: str) -> Judged:
-    """One judged grader: compose once, vote as many times as configured, count."""
+    """One judged grader: compose once, vote as many times as configured, count.
+
+    A config that does not validate fails the grader with the reason, and asks no judge.
+    """
+    if grader.config_error is not None:
+        return Judged(failed(grader, f"invalid config: {grader.config_error}"))
     shown = material(grader, document, Path(case_dir))
     if shown.skip_reason is not None:
         return Judged(skipped(grader, shown.skip_reason))
