@@ -114,7 +114,7 @@ writes exactly the keys and values the module writes today, except where `plan_m
 - [x] `cowork.py`: `SessionDocument`, `Turn`, `ToolCall`, `RunLogEntry`, `SessionRecord`, `AuditRecord`, `Message`, `ContentBlock`. `docs/cowork_driver_internals.md` "The API" says `run` and `collect` return a `SessionDocument`, serialised with `model_dump_json()`, and `history` returns one `RunLogEntry` per line, oldest first.
 - [x] `judge.py`: `JudgeOutput`, `JudgeVerdict`, and the typed `LlmGraderConfig` and `BaselineGraderConfig`.
 - [x] `results.py`: `ResultDocument`, `SuiteInfo`, `PluginRef`, `SuiteAggregates`, `CaseEntry`, `Arms`, `CaseAggregates`, `GraderDefinition`, `RunEntry`, `CoWorkRef`. `results.Run` and `results.CaseResult` are removed.
-- [ ] `cowork_backend.py` reads and writes `ResultDocument` and `SessionDocument`.
+- [x] `cowork_backend.py` reads and writes `ResultDocument` and `SessionDocument`.
 - [ ] `traces.py`: `TraceRecord`, and the result document read and rewritten as `ResultDocument`.
 - [ ] `checks.py`: `Outcome` and `JudgeCall` as `plan_models.md` gives them, and the result document read and rewritten as `ResultDocument`.
 - [ ] `verdict.py` reads `ResultDocument`.
