@@ -61,18 +61,11 @@ def checks(backend: str, config: Config) -> list[str]:
     raise ValueError(f"no preflight for {backend}")
 
 
-def checks_all(config: Config) -> list[str]:
-    """Every backend's unmet conditions, in the order the backends are listed."""
-    return [line for backend in BACKENDS for line in checks(backend, config)]
-
-
 def report_all(config: Config) -> list[tuple[str, list[str]]]:
     """One entry per backend, in order, each with its unmet conditions.
 
-    `checks_all` flattens the same probe and loses which backend a line came from, and loses
-    a ready backend entirely: it contributes no line, so its output cannot be told from a
-    backend that was never reached. `check --all` prints this instead. The exit code still
-    comes from `checks_all`, so the two never disagree about pass and fail.
+    A ready backend is an entry with no line, so `check --all` can state it as ready, and the
+    exit code is read from the same entries.
     """
     return [(backend, checks(backend, config)) for backend in BACKENDS]
 
