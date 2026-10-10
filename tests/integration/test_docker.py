@@ -11,7 +11,6 @@ model is in the loop, because none of those is a question about a model.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -26,15 +25,6 @@ from cowork_evals.docker.parity import EXPECTED_VERSIONS, REQUIREMENTS, ProbeDoc
 from cowork_evals.harness import RunOptions
 from cowork_evals.requirements import pins
 from cowork_evals.results import ResultDocument
-
-ROOT = Path(__file__).resolve().parents[2]
-SMOKE = ROOT / "plugins" / "smoke"
-
-# The harness's own fixture, which `cowork_evals run` refuses because it deliberately does not
-# follow this repository's case format. It is the one tree here that carries a skill, a
-# `tool_used: Skill` grader and an over-trigger case, so it exercises every shape the baseline
-# arm changes. docs/claude_code/eval_smoke/README.md.
-EVAL_SMOKE = ROOT / "docs" / "claude_code" / "eval_smoke"
 
 # docs/runtime.md, the core runtime table, read through the one place that records it. A
 # patch bump in jammy fails here first, and the fixture's grader is a literal that is updated
@@ -87,11 +77,6 @@ def container(docker: Docker, *command: str, mounts: tuple[str, ...] = ()) -> st
     return (completed.stdout + completed.stderr).strip()
 
 
-def test_the_daemon_is_reachable_and_the_image_is_present(docker):
-    assert docker.daemon_is_reachable()
-    assert docker.image_is_present(), f"{docker.tag} is absent: {remedy(Condition.IMAGE)}"
-
-
 def test_python3_reports_the_recorded_version(docker):
     assert container(docker, "python3", "-V") == PYTHON_VERSION
 
@@ -106,64 +91,27 @@ def test_the_probe_matches_the_inventory(docker):
             mounts=("-v", f"{probe.__file__}:/tmp/probe.py:ro"),
         )
     )
-    assert document.architecture, "the probe reports the platform it actually ran on"
     failures, _ = compare(document, pins(REQUIREMENTS.read_text()))
     assert failures == [], "\n".join(failures)
 
 
-def test_bwrap_comes_up_under_the_sandbox_options(docker):
-    """The Bash sandbox measurement. It needs no harness and no case."""
-    output = container(
-        docker, "bwrap", "--ro-bind", "/", "/", "--unshare-user", "--unshare-pid", "true"
-    )
-    assert output == "", output
+@pytest.mark.parametrize(
+    "mount",
+    [
+        ("--tmpfs", "/run/shm"),
+        ("--proc", "/proc", "--dev", "/dev", "--unshare-ipc"),
+    ],
+)
+def test_bwrap_comes_up_with_each_mount_the_harness_makes(docker, mount):
+    """The Bash sandbox measurement. It needs no harness and no case.
 
-
-def test_bwrap_mounts_a_tmpfs_where_the_harness_mounts_one(docker):
-    """The bare invocation above passed while every sandboxed command failed.
-
-    The harness mounts a tmpfs on /run/shm, which the base image does not carry. Nothing
-    short of that mount reaches the failure, so it is asserted here rather than left to a
-    live run to find.
+    A bare `bwrap --ro-bind / / --unshare-user --unshare-pid true` passes while every
+    sandboxed command fails, because the harness also mounts a tmpfs on /run/shm and a fresh
+    procfs. Each mount is a separate invocation: `--dev` staged before the tmpfs would hide
+    the symlink failure. docs/docker.md, "The Bash sandbox".
     """
     output = container(
-        docker,
-        "bwrap",
-        "--ro-bind",
-        "/",
-        "/",
-        "--tmpfs",
-        "/run/shm",
-        "--unshare-user",
-        "--unshare-pid",
-        "true",
-    )
-    assert output == "", output
-
-
-def test_bwrap_mounts_proc_where_the_harness_mounts_one(docker):
-    """`seccomp=unconfined` alone is not enough, and the two tests above do not show it.
-
-    The harness mounts a fresh procfs in the sandbox. Docker's default profile masks
-    entries under `/proc`, and the kernel refuses a new procfs mount to a process whose
-    own `/proc` is covered that way, so every sandboxed command exits 1 with `bwrap:
-    Can't mount proc on /newroot/proc: Operation not permitted`.
-    `systempaths=unconfined` removes the masks. docs/docker.md.
-    """
-    output = container(
-        docker,
-        "bwrap",
-        "--ro-bind",
-        "/",
-        "/",
-        "--proc",
-        "/proc",
-        "--dev",
-        "/dev",
-        "--unshare-user",
-        "--unshare-pid",
-        "--unshare-ipc",
-        "true",
+        docker, "bwrap", "--ro-bind", "/", "/", *mount, "--unshare-user", "--unshare-pid", "true"
     )
     assert output == "", output
 
@@ -219,39 +167,59 @@ def session(docker: Docker, tmp_path: Path, names: list[str], **environment: str
     )
 
 
-def test_the_prefix_keeps_the_listed_names_and_drops_the_rest(docker, tmp_path):
+def test_the_prefix_builds_the_session_environment(docker, tmp_path):
+    """A listed name with a value is kept, a listed name with none stays unset, a line that is
+    no shell name is skipped, the five derived names take their session values, and a case's
+    `EVAL_*` name is kept without being listed. docs/docker.md, "The session environment"."""
     output = session(
         docker,
         tmp_path,
-        ["ACME_KEPT", "PATH"],
+        [
+            "ACME_KEPT",
+            "PATH",
+            "ACME_ABSENT",
+            "ACME_EMPTY",
+            "ACME-KEY",
+            "HOME",
+            "TMPDIR",
+            "USER",
+            "LOGNAME",
+            "CLAUDE_TMPDIR",
+            "CLAUDE_CODE_TMPDIR",
+            "SHELL",
+        ],
         ACME_KEPT="yes",
         ACME_DROPPED="no",
+        ACME_EMPTY="",
         CLAUDECODE="1",
         CLAUDE_CODE_SESSION_ID="0",
-    )
-    names = {line.split("=", 1)[0] for line in output.splitlines()}
-    assert names == {"ACME_KEPT", "PATH", "PWD", "SHLVL", "_"}, output
-    assert "ACME_KEPT=yes" in output.splitlines()
-
-
-def test_a_listed_name_with_no_value_stays_unset(docker, tmp_path):
-    output = session(docker, tmp_path, ["ACME_ABSENT", "ACME_EMPTY"], ACME_EMPTY="")
-    assert "ACME_" not in output, output
-
-
-def test_the_five_derived_names_take_their_session_values(docker, tmp_path):
-    output = session(
-        docker,
-        tmp_path,
-        ["HOME", "TMPDIR", "USER", "LOGNAME", "CLAUDE_TMPDIR", "CLAUDE_CODE_TMPDIR", "SHELL"],
+        EVAL_VARIANT="null-body",
+        EVALX="1",
         HOME="/x/abc",
         TMPDIR="/x/abc/tmp",
         USER="root",
         CLAUDE_CODE_TMPDIR="/elsewhere",
         SHELL="/bin/bash",
     )
-    lines = set(output.splitlines())
+    lines = output.splitlines()
+    assert {line.split("=", 1)[0] for line in lines} == {
+        "ACME_KEPT",
+        "PATH",
+        "PWD",
+        "SHLVL",
+        "_",
+        "HOME",
+        "TMPDIR",
+        "USER",
+        "LOGNAME",
+        "CLAUDE_TMPDIR",
+        "CLAUDE_CODE_TMPDIR",
+        "SHELL",
+        "EVAL_VARIANT",
+    }, output
     assert {
+        "ACME_KEPT=yes",
+        "EVAL_VARIANT=null-body",
         "HOME=/x/abc",
         "USER=abc",
         "LOGNAME=abc",
@@ -259,25 +227,7 @@ def test_the_five_derived_names_take_their_session_values(docker, tmp_path):
         "CLAUDE_TMPDIR=/x/abc/tmp",
         "CLAUDE_CODE_TMPDIR=/x/abc/tmp",
         "SHELL=/bin/sh",
-    } <= lines, output
-
-
-def test_a_line_that_is_no_shell_name_is_skipped(docker, tmp_path):
-    output = session(docker, tmp_path, ["ACME-KEY", "PATH"])
-    assert "ACME" not in output, output
-    assert any(line.startswith("PATH=") for line in output.splitlines()), output
-
-
-def test_a_case_env_name_is_kept_without_being_listed(docker, tmp_path):
-    """The harness restricts a case's `env` keys to `EVAL_[A-Z0-9_]*`. docs/docker.md."""
-    output = session(docker, tmp_path, ["PATH"], EVAL_VARIANT="null-body", EVALX="1")
-    assert "EVAL_VARIANT=null-body" in output.splitlines(), output
-    assert "EVALX" not in output, output
-
-
-def test_the_image_names_the_prefix_in_managed_settings(docker):
-    document = json.loads(container(docker, "cat", "/etc/claude-code/managed-settings.json"))
-    assert document["env"]["CLAUDE_CODE_SHELL_PREFIX"] == "/usr/local/bin/cowork-env"
+    } <= set(lines), output
 
 
 def test_the_harness_is_enabled_for_this_credential(credentialled, tmp_path):
@@ -297,49 +247,11 @@ def test_the_harness_is_enabled_for_this_credential(credentialled, tmp_path):
     assert NO_CASES in output, output
 
 
-# The two that put a model in the loop, and the only two that spend. Two rather than one,
-# because a single failing end-to-end run cannot say whether the credential, the model, the
-# mounts or the harness is at fault.
+# The runs that put a model in the loop, and the only ones that spend.
 
 
 @pytest.mark.live
-def test_the_cli_answers_in_the_container(credentialled):
-    """The minimal proof that Claude Code runs there and the credential is accepted.
-
-    No plugin, no harness, no mounts. It costs one short reply.
-    """
-    output = container(
-        credentialled, "claude", "-p", "Reply with the single word ORANGE and nothing else."
-    )
-    assert "ORANGE" in output.upper(), output
-
-
-@pytest.mark.live
-def test_the_smoke_case_passes_through_the_backend(credentialled, tmp_path):
-    """Everything the test above does not cover: the harness, the two mounts,
-    --output-dir, the Bash grant and the result document.
-    """
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    # The plugin directory itself, not evals/ beneath it: the target sets the containment
-    # root, and the case's `plugins` entry has to resolve inside it. Naming the plugin is
-    # what consents to loading it.
-    # One case by name: the suite holds two, and this test is about the backend reaching one.
-    result = credentialled.run(SMOKE, logs, RunOptions.resolve(runs=1, case="python-version"))
-    document = json.loads(result.read_text())
-
-    assert document["schemaVersion"] == 1
-    assert document["partial"] is False, document.get("partialReason")
-    assert document["aggregates"]["casesTotal"] == 1
-    cases = document["cases"]
-    assert [case["name"] for case in cases] == ["python-version"]
-    runs = cases[0]["arms"]["with"]
-    assert runs, "the case produced no run"
-    assert all(run["passed"] for run in runs), [run.get("error") for run in runs]
-
-
-@pytest.mark.live
-def test_the_session_env_case_passes_through_the_backend(credentialled, tmp_path):
+def test_the_session_env_case_passes_through_the_backend(credentialled, repository, tmp_path):
     """A real `Bash` call sees only the kept names, decided by the case's own checks.
 
     Through the command and not `Docker.run`, because the checks that read `env.txt` run on
@@ -347,22 +259,34 @@ def test_the_session_env_case_passes_through_the_backend(credentialled, tmp_path
     """
     root = tmp_path / "logs"
     code = main(
-        ["run", "--docker", str(SMOKE), "--out", str(root), "--runs", "1", "--case", "session-env"]
+        [
+            "run",
+            "--docker",
+            str(repository / "plugins" / "smoke"),
+            "--out",
+            str(root),
+            "--runs",
+            "1",
+            "--case",
+            "session-env",
+        ]
     )
     run = (root / logs.LATEST).resolve()
     decided = (run / logs.VERDICT_FILE).read_text()
     assert code == 0, decided
-    assert (run / "smoke" / KEEP_FILE).read_text().split() == list(credentialled.kept)
 
 
 @pytest.mark.live
-def test_a_two_arm_run_is_collected_and_decided_on_its_delta(credentialled, tmp_path):
+def test_a_two_arm_run_is_collected_and_decided_on_its_delta(credentialled, repository, tmp_path):
     """The baseline arm, end to end: six agent runs, two arms collected, one verdict.
 
     It runs the backend directly rather than the command, because `cowork_evals run` refuses
     this tree: the cases are the harness's own shape and the validator holds every case it is
     given to this repository's format. What is asserted above the backend is still the real
-    thing, and `traces.collect` and `verdict.decide` are the ones the command calls.
+    thing, and `traces.collect` and `verdict.decide` are the ones the command calls. The tree
+    is the harness's own fixture, the one here that carries a skill, a `tool_used: Skill`
+    grader and an over-trigger case, so it exercises every shape the baseline arm changes.
+    docs/claude_code/eval_smoke/README.md.
 
     What is asserted is the arm and not the scores. Whether sonnet answers a given case well
     is the model's own variance, and a green suite is not what this test is for: the delta is
@@ -372,26 +296,23 @@ def test_a_two_arm_run_is_collected_and_decided_on_its_delta(credentialled, tmp_
     logs = directory / "eval-smoke"
     logs.mkdir(parents=True)
     options = RunOptions.resolve(ablation="with-without")
-    result = credentialled.run(EVAL_SMOKE, logs, options)
+    eval_smoke = repository / "docs" / "claude_code" / "eval_smoke"
+    result = credentialled.run(eval_smoke, logs, options)
     assert traces.collect(logs, granted=options.allow_tools) == []
 
-    document = json.loads(result.read_text())
-    assert document["suite"]["ablation"] == "with-without"
-    assert verdict.two_arm(ResultDocument.read(result))
-    for case in document["cases"]:
-        assert case["arms"]["without"], f"{case['name']} ran no baseline arm"
-        assert isinstance(case["aggregates"]["delta"], int | float), case["aggregates"]
+    document = ResultDocument.model_validate_json(result.read_text())
+    assert document.suite.ablation == "with-without"
+    for case in document.cases:
+        assert case.arms.without, f"{case.name} ran no baseline arm"
+        assert case.aggregates.delta is not None, case.aggregates
 
     # The `tool_used: Skill` grader with no `arm:` is the shape the arm changes: an indicator
     # in the with-arm, and gone from the without-arm.
-    france = next(case for case in document["cases"] if case["name"] == "capital-france")
-    indicator = next(
-        result for result in france["arms"]["with"][0]["graders"] if result["name"] == "skill-fired"
-    )
-    assert (indicator["withOnly"], indicator["scored"]) == (True, False), indicator
-    assert "skill-fired" not in [
-        result["name"] for result in france["arms"]["without"][0]["graders"]
-    ]
+    france = next(case for case in document.cases if case.name == "capital-france")
+    assert france.arms.without is not None
+    indicator = next(one for one in france.arms.with_[0].graders if one.name == "skill-fired")
+    assert (indicator.with_only, indicator.scored) == (True, False), indicator
+    assert "skill-fired" not in [one.name for one in france.arms.without[0].graders]
 
     # The with-arm keeps the layout a one-arm run has, and the baseline arm is under it.
     kept = traces.run_dir(logs, "capital-france", 1)

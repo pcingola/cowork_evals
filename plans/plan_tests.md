@@ -166,7 +166,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 - [x] [`tests/integration/test_cowork_backend.py`](plan_tests/integration_test_cowork_backend.md)
 - [x] [`tests/integration/test_judge.py`](plan_tests/integration_test_judge.md)
 - [x] [`tests/integration/test_cli.py`](plan_tests/integration_test_cli.md)
-- [ ] [`tests/integration/test_docker.py`](plan_tests/integration_test_docker.md). Docs: `docs/docker.md` "The mechanism" step 5 (a line that is not a shell name is skipped) and "The Bash sandbox" (the `--proc` mount and the `/run/shm` tmpfs).
+- [x] [`tests/integration/test_docker.py`](plan_tests/integration_test_docker.md). Docs: `docs/docker.md` "The mechanism" step 5 (a line that is not a shell name is skipped) and "The Bash sandbox" (the `--proc` mount and the `/run/shm` tmpfs).
 - [ ] Delete every fixture under `tests/data/` that `data.md` lists for deletion, and every other file there that no test reads. `grep` for each path under `tests/` returns nothing before it is deleted.
 - [ ] Line count. Each test file is shorter than its unit: the module of the same name under `src/cowork_evals/` (`docker/__init__.py` for `test_docker.py`, `docker/parity.py` for `test_parity.py`, `docker/pytest_image.py` for `test_pytest_image.py`), and `requirements.py` with `scripts/*.sh` for `test_environments.py`. `tests/` as a whole is shorter than `src/cowork_evals/`. A file that is longer gets new rows in its `plan_tests/` file, the developer approves them, and they are applied before this box is ticked.
 - [ ] `./scripts/test.sh -m integration` passes.

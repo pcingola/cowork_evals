@@ -513,7 +513,7 @@ in CoWork, and its case fails in Docker.
 | 2    | `Docker.run` writes the three lists to `keep_env.txt` in the run's log directory, one name per line           |
 | 3    | `run_argv` mounts that file read-only at `/etc/cowork_evals/keep_env.txt`                                      |
 | 4    | Claude Code runs `cowork-env '<command>'` for each `Bash` call and each hook command                           |
-| 5    | `cowork-env` builds `NAME=value` for each listed name with a value and each `EVAL_*` name, and runs `env -i <pairs> /bin/bash -c '<command>'` |
+| 5    | `cowork-env` skips a line that is empty or not a shell name, builds `NAME=value` for each listed name with a value and each `EVAL_*` name, and runs `env -i <pairs> /bin/bash -c '<command>'` |
 
 The prefix goes in managed settings, because the harness strips variables it does not know
 from the CLI it starts, and managed settings still apply inside a run. For the same reason the
@@ -656,8 +656,8 @@ The second is the one a bare `bwrap` invocation does not reach. Docker masks ent
 `/proc` by default, and the kernel refuses a fresh procfs mount to a process whose own `/proc` is
 covered that way. The harness mounts one, so every sandboxed command fails while
 `bwrap --ro-bind / / --unshare-user --unshare-pid true` still succeeds.
-`tests/integration/test_docker.py` therefore asserts the `--proc` mount as well as the bare
-invocation.
+`tests/integration/test_docker.py` therefore asserts the `--proc` mount and the `/run/shm`
+tmpfs.
 
 The image also replaces `/run/shm` with a real directory. Jammy ships it as a symlink to
 `/dev/shm`, and bubblewrap mounts a tmpfs there: the symlink resolves against a new root whose
