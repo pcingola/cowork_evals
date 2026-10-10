@@ -122,7 +122,8 @@ def test_case_yaml_is_the_base_and_prompt_md_overrides_it() -> None:
     staged = read(EVALS / "plugin" / "staged")
     assert staged.source == "mixed"
     assert staged.name == "staged", "the case.yaml name, since the frontmatter writes none"
-    assert read(ROOT / "merge" / "evals" / "plugin" / "override").name == "from-prompt-md"
+    override = read(ROOT / "merge" / "evals" / "plugin" / "override")
+    assert (override.source, override.name) == ("mixed", "from-prompt-md")
 
 
 def test_the_case_reader_carries_the_check_files_in_path_order() -> None:
