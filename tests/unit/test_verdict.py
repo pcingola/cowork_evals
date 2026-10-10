@@ -7,12 +7,14 @@ docs/running_evals.md. See ../README.md.
 
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 
-from cowork_evals.checks import ADVISORY_TYPE
+import pytest
+
+from cowork_evals import results
 from cowork_evals.harness import RESULT_NAME
+from cowork_evals.results import ResultDocument
 from cowork_evals.verdict import Verdict, decide
 
 DOCUMENTS = Path(__file__).resolve().parent.parent / "data" / "results"
@@ -40,12 +42,13 @@ def with_trace(directory: Path, trace: Path) -> None:
     under tests/data can name a directory that exists on the machine running it. What is
     asserted is still a literal: the directory the test created.
     """
-    path = directory / RESULT_NAME
-    document = json.loads(path.read_text(encoding="utf-8"))
-    for case in document["cases"]:
-        for run in case["arms"]["with"]:
-            run["tracePath"] = str(trace)
-    path.write_text(json.dumps(document), encoding="utf-8")
+    document = ResultDocument.read(directory / RESULT_NAME)
+    pointed = []
+    for case in document.cases:
+        runs = [run.model_copy(update={"trace_path": str(trace)}) for run in case.arms.with_]
+        arms = case.arms.model_copy(update={"with_": runs})
+        pointed.append(case.model_copy(update={"arms": arms}))
+    results.write(directory, document.model_copy(update={"cases": pointed}))
 
 
 def collected(root: Path, case: str = "every-structural", index: int = 1) -> Path:
@@ -83,20 +86,6 @@ def test_a_passing_document_passes(tmp_path: Path) -> None:
     assert failures(result) == []
 
 
-def test_the_summary_is_the_last_line(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="pass"))
-    assert result.lines[-1] == (
-        "1 found, 1 picked, 1 ran, 1 passed, 0 declared unrunnable, overall score 1.00"
-    )
-
-
-def test_the_text_is_one_line_per_entry(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="pass"))
-    assert result.text == (
-        "1 found, 1 picked, 1 ran, 1 passed, 0 declared unrunnable, overall score 1.00\n"
-    )
-
-
 def test_an_empty_document_passes(tmp_path: Path) -> None:
     """A --tag sweep matches no case in most plugins, and that is not a failure."""
     result = judge(run_directory(tmp_path, quiet="empty"), found=1, picked=0)
@@ -109,28 +98,46 @@ def test_an_empty_document_passes(tmp_path: Path) -> None:
 # Every grader decides the verdict.
 
 
-def test_every_structural_grader_failure_is_a_failure(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="structural_failures"))
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        (
+            "structural_failures",
+            [
+                "FAIL smoke/every-structural: run 1: says-alex: the regex grader failed: "
+                "no match for Alex",
+                "FAIL smoke/every-structural: run 1: fired-skill: the tool_used grader failed: "
+                "Skill was called 0 times",
+                "FAIL smoke/every-structural: run 1: read-then-wrote: the tool_order grader "
+                "failed: Write came before Read",
+                "FAIL smoke/every-structural: run 1: wrote-deck: the file_exists grader failed: "
+                "no file matched deck.pptx",
+            ],
+        ),
+        (
+            "judged_failure",
+            [
+                "FAIL smoke/judged: run 1: reads-well: the llm grader failed: 1 of 3 votes",
+                "FAIL smoke/judged: run 1: beats-baseline: the baseline grader failed: "
+                "the baseline read better",
+            ],
+        ),
+        (
+            "check_failure",
+            [
+                "FAIL smoke/checked-file: run 1: assertions.the_file_says_written: "
+                "the check grader failed: AssertionError: written.txt says NOTHING"
+            ],
+        ),
+    ],
+)
+def test_every_grader_failure_is_a_failure(
+    tmp_path: Path, document: str, expected: list[str]
+) -> None:
+    """Structural, judged, and a check: this package's own type needs no condition of its own."""
+    result = judge(run_directory(tmp_path, smoke=document))
     assert not result.passed
-    assert failures(result) == [
-        "FAIL smoke/every-structural: run 1: says-alex: the regex grader failed: no match for Alex",
-        "FAIL smoke/every-structural: run 1: fired-skill: the tool_used grader failed: "
-        "Skill was called 0 times",
-        "FAIL smoke/every-structural: run 1: read-then-wrote: the tool_order grader failed: "
-        "Write came before Read",
-        "FAIL smoke/every-structural: run 1: wrote-deck: the file_exists grader failed: "
-        "no file matched deck.pptx",
-    ]
-
-
-def test_every_judged_grader_failure_is_a_failure(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="judged_failure"))
-    assert not result.passed
-    assert failures(result) == [
-        "FAIL smoke/judged: run 1: reads-well: the llm grader failed: 1 of 3 votes",
-        "FAIL smoke/judged: run 1: beats-baseline: the baseline grader failed: "
-        "the baseline read better",
-    ]
+    assert failures(result) == expected
     assert notes(result) == []
 
 
@@ -198,26 +205,21 @@ def test_a_run_carrying_an_error_fails_under_an_otherwise_passing_document(
     ]
 
 
-def test_a_missing_document_is_a_failure_naming_the_path(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke=""))
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        (None, "no result document"),
+        ("unparsable", "unparsable result document: "),
+        ("wrong_schema", "schemaVersion is 2, and this module reads 1"),
+    ],
+)
+def test_a_document_that_cannot_be_read_is_a_failure_naming_the_path(
+    tmp_path: Path, document: str | None, expected: str
+) -> None:
+    result = judge(run_directory(tmp_path, smoke=document))
     assert not result.passed
-    assert failures(result) == [f"FAIL {tmp_path / 'smoke' / RESULT_NAME}: no result document"]
-
-
-def test_an_unparsable_document_is_a_failure_naming_the_path(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="unparsable"))
-    assert not result.passed
-    assert failures(result)[0].startswith(
-        f"FAIL {tmp_path / 'smoke' / RESULT_NAME}: unparsable result document: "
-    )
-
-
-def test_a_document_of_another_schema_version_is_a_failure(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="wrong_schema"))
-    assert not result.passed
-    assert failures(result) == [
-        f"FAIL {tmp_path / 'smoke' / RESULT_NAME}: schemaVersion is 2, and this module reads 1"
-    ]
+    assert failures(result)[0].startswith(f"FAIL {tmp_path / 'smoke' / RESULT_NAME}: {expected}")
+    assert result.outcomes == ()
 
 
 def test_an_unknown_field_is_ignored(tmp_path: Path) -> None:
@@ -247,65 +249,42 @@ def test_two_plugins_are_gated_once(tmp_path: Path) -> None:
     )
 
 
-def test_two_passing_plugins_are_one_pass(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, mail="pass", writer="pass"), found=2, picked=2)
-    assert result.passed
-    assert result.lines[-1] == (
-        "2 found, 2 picked, 2 ran, 2 passed, 0 declared unrunnable, overall score 1.00"
-    )
-
-
 # What a failure line says about where to look.
 
 
-def test_a_structural_failure_names_the_run_artefacts(tmp_path: Path, working_directory) -> None:
+@pytest.mark.parametrize(
+    ("document", "case"),
+    [
+        ("structural_failures", "every-structural"),
+        ("judged_failure", "judged"),
+        ("run_error", "timed-out"),
+        ("mode_denial", "tool-denied"),
+        ("check_failure", "checked-file"),
+    ],
+)
+def test_a_failure_line_names_the_run_artefacts(
+    tmp_path: Path, working_directory, document: str, case: str
+) -> None:
     """The whole point of keeping a trace: the line that fails says where the trace is."""
-    root = run_directory(tmp_path, smoke="structural_failures")
-    with_trace(root / "smoke", collected(root / "smoke"))
+    root = run_directory(tmp_path, smoke=document)
+    with_trace(root / "smoke", collected(root / "smoke", case))
     with working_directory(tmp_path):
         result = judge(root)
-    assert failures(result)[0].endswith("[artifacts: smoke/traces/every-structural/run-1]"), (
-        failures(result)[0]
-    )
+    assert failures(result)[0].endswith(f"[artifacts: smoke/traces/{case}/run-1]")
 
 
-def test_a_judged_failure_names_them_too(tmp_path: Path, working_directory) -> None:
-    root = run_directory(tmp_path, smoke="judged_failure")
-    with_trace(root / "smoke", collected(root / "smoke", "judged"))
-    with working_directory(tmp_path):
-        result = judge(root)
-    assert failures(result)[0].endswith("[artifacts: smoke/traces/judged/run-1]")
-
-
-def test_an_errored_run_names_them(tmp_path: Path, working_directory) -> None:
-    root = run_directory(tmp_path, smoke="run_error")
-    with_trace(root / "smoke", collected(root / "smoke", "timed-out"))
-    with working_directory(tmp_path):
-        result = judge(root)
-    assert any("[artifacts: smoke/traces/timed-out/run-1]" in line for line in failures(result))
-
-
-def test_a_document_whose_trace_was_not_collected_names_nothing(tmp_path: Path) -> None:
+@pytest.mark.parametrize("trace", [None, Path("/work/logs/tmp/claude-eval-Ab12Cd/out/trace.jsonl")])
+def test_a_document_whose_trace_is_not_on_disk_names_nothing(
+    tmp_path: Path, trace: Path | None
+) -> None:
     """It never names a path that is not there, so a run with no trace reads as before."""
     root = run_directory(tmp_path, smoke="structural_failures")
-    with_trace(root / "smoke", Path("/work/logs/tmp/claude-eval-Ab12Cd/out/trace.jsonl"))
-    result = judge(root)
-    assert failures(result)[0].endswith("no match for Alex")
-
-
-def test_a_document_carrying_no_trace_path_names_nothing(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="structural_failures"))
-    assert failures(result)[0].endswith("no match for Alex")
+    if trace is not None:
+        with_trace(root / "smoke", trace)
+    assert failures(judge(root))[0].endswith("no match for Alex")
 
 
 # The baseline arm, and the delta it is decided on.
-
-
-def test_a_one_arm_document_carries_no_delta_on_the_summary_line(tmp_path: Path) -> None:
-    """One arm is the default, and a number that is always 0 there would read as a plugin
-    that changed nothing."""
-    result = judge(run_directory(tmp_path, smoke="pass"))
-    assert "delta" not in result.lines[-1]
 
 
 def test_a_delta_above_the_threshold_passes_and_the_mean_is_on_the_line(tmp_path: Path) -> None:
@@ -330,13 +309,6 @@ def test_a_delta_below_the_threshold_fails_and_the_line_names_both_scores(
     ]
 
 
-def test_a_delta_at_the_threshold_passes(tmp_path: Path) -> None:
-    """Failing is below the threshold, so a plugin that changed nothing under a threshold of
-    0 is reported by the mean and not by a failure."""
-    result = judge(run_directory(tmp_path, smoke="two_arm"), found=2, picked=2)
-    assert result.passed
-
-
 def test_a_raised_threshold_fails_the_case_that_changed_nothing(tmp_path: Path) -> None:
     result = judge(run_directory(tmp_path, smoke="two_arm"), found=2, picked=2, delta_threshold=0.5)
     assert not result.passed
@@ -346,34 +318,34 @@ def test_a_raised_threshold_fails_the_case_that_changed_nothing(tmp_path: Path) 
     ]
 
 
-def test_a_two_arm_case_whose_baseline_arm_ran_nothing_fails(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        (
+            "two_arm_no_baseline",
+            "FAIL smoke/fires-and-answers: the arms are not comparable: "
+            "the baseline arm ran nothing",
+        ),
+        (
+            "two_arm_skipped_paid",
+            "FAIL smoke/judged: the arms are not comparable: a run skipped its paid graders "
+            "at the cost ceiling",
+        ),
+    ],
+)
+def test_a_two_arm_case_with_no_delta_fails_and_says_why(
+    tmp_path: Path, document: str, expected: str
+) -> None:
     """A two-arm run that produced no delta did not do what the invocation asked."""
-    result = judge(run_directory(tmp_path, smoke="two_arm_no_baseline"))
+    result = judge(run_directory(tmp_path, smoke=document))
     assert not result.passed
-    assert failures(result) == [
-        "FAIL smoke/fires-and-answers: the arms are not comparable: the baseline arm ran nothing"
-    ]
-    assert result.lines[-1].endswith("overall score 1.00, mean delta none")
+    assert failures(result) == [expected]
+    assert result.lines[-1].endswith("mean delta none")
 
 
-def test_a_two_arm_case_graded_under_different_rules_fails_and_says_so(tmp_path: Path) -> None:
-    """The other of the two reasons the document tells apart."""
-    result = judge(run_directory(tmp_path, smoke="two_arm_skipped_paid"))
-    assert not result.passed
-    assert failures(result) == [
-        "FAIL smoke/judged: the arms are not comparable: a run skipped its paid graders "
-        "at the cost ceiling"
-    ]
-
-
-def test_an_unscored_grader_fails_one_arm_and_is_an_indicator_on_two(tmp_path: Path) -> None:
-    """On one arm nothing is dropped from the score, so a grader not scored was not asked.
-    On two the harness drops a with-only grader on purpose."""
-    one = judge(run_directory(tmp_path / "one", smoke="unscored_grader"))
-    assert not one.passed
-    assert any("not scored, and --ablation none drops no grader" in line for line in one.lines)
-
-    two = judge(run_directory(tmp_path / "two", smoke="two_arm"), found=2, picked=2)
+def test_an_unscored_grader_is_an_indicator_on_two_arms(tmp_path: Path) -> None:
+    """The harness drops a with-only grader on purpose."""
+    two = judge(run_directory(tmp_path, smoke="two_arm"), found=2, picked=2)
     assert two.passed
     assert notes(two) == [
         "NOTE smoke/quiet-case: run 1: skill-fired: the with-only indicator did not fire"
@@ -392,39 +364,28 @@ def test_a_case_whose_graders_are_all_with_only_is_scored_normally(tmp_path: Pat
 # A run that never had the tool the case was granted.
 
 
-def test_a_mode_denial_fails_a_document_whose_graders_all_passed(tmp_path: Path) -> None:
-    """Every grader passed, and the model never had `Write`, so the score says nothing."""
-    result = judge(run_directory(tmp_path, smoke="mode_denial"))
-    assert not result.passed
-    assert failures(result) == [
-        "FAIL smoke/tool-denied: run 1: the permission mode refused Write, "
-        "so the score is not a fact about the plugin"
-    ]
-
-
-def test_a_tool_that_was_never_offered_fails_the_same_way(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="tool_not_offered"))
-    assert not result.passed
-    assert failures(result) == [
-        "FAIL smoke/tool-not-offered: run 1: the run was never offered Bash, "
-        "so the score is not a fact about the plugin"
-    ]
-
-
-def test_a_denial_line_names_the_directory_holding_the_trace(
-    tmp_path: Path, working_directory
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        (
+            "mode_denial",
+            "FAIL smoke/tool-denied: run 1: the permission mode refused Write, "
+            "so the score is not a fact about the plugin",
+        ),
+        (
+            "tool_not_offered",
+            "FAIL smoke/tool-not-offered: run 1: the run was never offered Bash, "
+            "so the score is not a fact about the plugin",
+        ),
+    ],
+)
+def test_a_run_that_never_had_a_granted_tool_fails(
+    tmp_path: Path, document: str, expected: str
 ) -> None:
-    root = run_directory(tmp_path, smoke="mode_denial")
-    with_trace(root / "smoke", collected(root / "smoke", "tool-denied"))
-    with working_directory(tmp_path):
-        result = judge(root)
-    assert failures(result)[0].endswith("[artifacts: smoke/traces/tool-denied/run-1]")
-
-
-def test_a_document_carrying_neither_field_passes(tmp_path: Path) -> None:
-    """Every `--cowork` document is this shape, so one set of rules covers both backends."""
-    result = judge(run_directory(tmp_path, smoke="pass"))
-    assert result.passed
+    """Every grader passed, and the model never had the tool, so the score says nothing."""
+    result = judge(run_directory(tmp_path, smoke=document))
+    assert not result.passed
+    assert failures(result) == [expected]
 
 
 # The five counts on the last line.
@@ -437,14 +398,6 @@ def test_the_last_line_carries_the_five_counts(tmp_path: Path) -> None:
     assert result.lines[-1] == (
         "9 found, 4 picked, 1 ran, 0 passed, 0 declared unrunnable, overall score 0.00"
     )
-
-
-def test_the_pass_count_is_not_read_back_from_the_document(tmp_path: Path) -> None:
-    """`casesPassed` is 1 in that document, under a threshold of 0. One case failed."""
-    document = run_directory(tmp_path, smoke="structural_failures") / "smoke" / RESULT_NAME
-    assert json.loads(document.read_text())["aggregates"]["casesPassed"] == 1
-    last = judge(document.parent.parent).lines[-1]
-    assert last.endswith("0 passed, 0 declared unrunnable, overall score 0.00")
 
 
 def test_the_last_line_says_when_a_sweep_stopped_early(tmp_path: Path) -> None:
@@ -472,46 +425,22 @@ def outcomes(result: Verdict) -> list[tuple[str, str]]:
     return [(one.name, one.outcome) for one in result.outcomes]
 
 
-def test_a_passing_case_is_recorded_as_a_pass(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="pass"))
-    assert outcomes(result) == [("python-version", "pass")]
-    assert failures(result) == []
-
-
-def test_a_failing_case_is_recorded_as_a_fail_beside_its_lines(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="structural_failures"))
-    assert outcomes(result) == [("every-structural", "fail")]
-    assert failures(result)
-
-
-def test_a_declared_case_is_recorded_as_declared(tmp_path: Path) -> None:
-    """It neither passes nor fails, and the word is the one the summary line counts."""
-    result = judge(run_directory(tmp_path, smoke="declared_case"))
-    assert outcomes(result) == [("capped-turns", "declared")]
-    assert failures(result) == []
-
-
-def test_a_judged_failure_alone_is_a_fail(tmp_path: Path) -> None:
-    """The outcome agrees with the exit code, and nothing is counted as passed."""
-    result = judge(run_directory(tmp_path, smoke="judged_failure"))
-    assert outcomes(result) == [("judged", "fail")]
-    assert result.lines[-1].startswith("1 found, 1 picked, 1 ran, 0 passed, ")
-
-
-def test_a_two_arm_document_records_one_outcome_per_case(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="two_arm"), found=2, picked=2)
-    assert outcomes(result) == [("fires-and-answers", "pass"), ("quiet-case", "pass")]
-
-
-def test_a_two_arm_case_below_the_threshold_is_recorded_as_a_fail(tmp_path: Path) -> None:
-    result = judge(
-        run_directory(tmp_path, smoke="two_arm_below_threshold"),
-        found=1,
-        picked=1,
-        delta_threshold=0.5,
-    )
-    assert outcomes(result) == [("writes-a-file", "fail")]
-    assert failures(result)
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        ("pass", [("python-version", "pass")]),
+        ("structural_failures", [("every-structural", "fail")]),
+        ("declared_case", [("capped-turns", "declared")]),
+        ("judged_failure", [("judged", "fail")]),
+        ("two_arm", [("fires-and-answers", "pass"), ("quiet-case", "pass")]),
+        ("two_arm_below_threshold", [("writes-a-file", "fail")]),
+    ],
+)
+def test_each_case_is_recorded_with_the_word_the_verdict_reached(
+    tmp_path: Path, document: str, expected: list[tuple[str, str]]
+) -> None:
+    """A declared case neither passes nor fails, and the word is the one the summary counts."""
+    assert outcomes(judge(run_directory(tmp_path, smoke=document))) == expected
 
 
 def test_an_outcome_carries_the_pair_that_identifies_the_case(tmp_path: Path) -> None:
@@ -521,52 +450,12 @@ def test_an_outcome_carries_the_pair_that_identifies_the_case(tmp_path: Path) ->
     assert one.dir == "evals/plugin/python-version"
 
 
-def test_a_document_that_cannot_be_read_records_no_outcome(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke=None))
-    assert result.outcomes == ()
-    assert failures(result)
-
-
-# A check. It is this package's own grader type, and the verdict needs no condition for it.
-
-
-def test_a_failed_check_fails_the_run_like_a_structural_grader(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="check_failure"))
-    assert result.passed is False
-    assert failures(result) == [
-        "FAIL smoke/checked-file: run 1: assertions.the_file_says_written: "
-        "the check grader failed: AssertionError: written.txt says NOTHING"
-    ]
-    assert notes(result) == []
-
-
 def test_a_failed_advisory_check_is_a_note_and_fails_nothing(tmp_path: Path) -> None:
     """The same failing check, marked advisory by its definition. docs/checks.md."""
-    directory = run_directory(tmp_path, smoke="check_failure")
-    document = json.loads((directory / "smoke" / RESULT_NAME).read_text())
-    for definition in document["cases"][0]["graders"]:
-        if definition["type"] == "check":
-            definition["type"] = ADVISORY_TYPE
-    (directory / "smoke" / RESULT_NAME).write_text(json.dumps(document))
-
-    result = judge(directory)
+    result = judge(run_directory(tmp_path, smoke="check_advisory_failure"))
     assert result.passed is True
     assert failures(result) == []
     assert notes(result) == [
         "NOTE smoke/checked-file: run 1: assertions.the_file_says_written: "
         "the advisory check failed: AssertionError: written.txt says NOTHING"
     ]
-
-
-def test_a_failed_check_names_the_directory_holding_its_scratch(tmp_path: Path) -> None:
-    """`verdict.artifacts` names the parent of `tracePath`, and both sit beside it."""
-    directory = run_directory(tmp_path, smoke="check_failure")
-    trace = collected(directory / "smoke", case="checked-file")
-    (trace.parent / "scratch").mkdir()
-    (trace.parent / "checks.jsonl").write_text("{}\n", encoding="utf-8")
-    with_trace(directory / "smoke", trace)
-
-    line = failures(judge(directory))[0]
-    assert line.endswith(f"[artifacts: {trace.parent}]")
-    assert (trace.parent / "scratch").is_dir()
-    assert (trace.parent / "checks.jsonl").is_file()

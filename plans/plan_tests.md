@@ -157,7 +157,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 - [x] [`tests/unit/test_preflight.py`](plan_tests/unit_test_preflight.md), with `preflight.checks_all` deleted.
 - [x] [`tests/unit/test_logs.py`](plan_tests/unit_test_logs.md). Docs: `docs/running_evals.md` "What a run leaves behind" (the `image` line on `--docker` only, and the `session_env` and `keep_env` lines).
 - [x] [`tests/unit/test_traces.py`](plan_tests/unit_test_traces.md)
-- [ ] [`tests/unit/test_verdict.py`](plan_tests/unit_test_verdict.md)
+- [x] [`tests/unit/test_verdict.py`](plan_tests/unit_test_verdict.md)
 - [ ] [`tests/unit/test_panel.py`](plan_tests/unit_test_panel.md)
 - [ ] [`tests/unit/test_environments.py`](plan_tests/unit_test_environments.md)
 - [ ] [`tests/unit/test_resources.py`](plan_tests/unit_test_resources.md). Docs: `docs/cli.md` "docs" (the name escape).
