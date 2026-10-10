@@ -47,7 +47,7 @@ not the system's: what is built and usable is
 | 15 | [`done/plan_consent.20260913.md`](done/plan_consent.20260913.md) | The keyboard consent dialog, shown by the driver rather than by a caller | implemented | `fix/consent` |
 | 16 | [`plan_artifact_checks.md`](plan_artifact_checks.md) | An assertion an author writes as code, deciding the run beside the harness's graders | written | `feat/artifact-checks` |
 | 17 | [`done/plan_session_env.20260923.md`](done/plan_session_env.20260923.md) | A Docker run's `Bash` calls see only the CoWork session environment | implemented | `feat/session-env` |
-| 18 | [`plan_tests.md`](plan_tests.md) | Typed models across the package, and a test suite where each test checks one stated requirement. Per-file decisions in [`plan_tests/`](plan_tests), models in [`plan_models.md`](plan_models.md) | written | `feat/typed-tests` |
+| 18 | [`done/plan_tests.20261010.md`](done/plan_tests.20261010.md) | Typed models across the package, and a test suite where each test checks one stated requirement. Per-file decisions in [`done/plan_tests.20261010/`](done/plan_tests.20261010), models in [`done/plan_models.20261010.md`](done/plan_models.20261010.md) | implemented | `feat/typed-tests` |
 
 | Status        | Means                                                                     |
 | ------------- | --------------------------------------------------------------------------- |
