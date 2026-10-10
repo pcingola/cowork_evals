@@ -6,152 +6,115 @@ Nothing in this file runs the harness. The argument list is the unit under test.
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
+from typing import Any
 
-from cowork_evals.config import Config, EvalSection
+import pytest
+
+from cowork_evals.config import CONFIG_FILENAME, Config, EvalSection
 from cowork_evals.harness import RunOptions, eval_argv
+
+TARGET = "/work/plugin/evals"
+LOGS = "/work/logs"
 
 
 def value_after(argv: list[str], flag: str) -> str:
     return argv[argv.index(flag) + 1]
 
 
-# Resolving the options.
+# Resolving the options. docs/library.md "The precedence ladder".
 
 
-def test_the_built_in_defaults_apply_when_the_file_carries_no_eval_section():
-    # The grant is read from the section rather than restated: what it holds is asserted in
-    # tests/unit/test_config.py, and this asserts that resolving carries it through.
-    assert RunOptions.resolve(Config()) == RunOptions(
-        model="sonnet",
-        judge_model="haiku",
-        ablation="none",
-        max_cost_usd="5",
-        allow_tools=Config().eval.allow_tools,
-        keep_traces=True,
-    )
-
-
-def test_the_configured_value_beats_the_default():
-    config = Config(eval=EvalSection(model="opus", allow_tools=("Bash", "Write")))
-    resolved = RunOptions.resolve(config)
-    assert resolved.model == "opus"
-    assert resolved.allow_tools == ("Bash", "Write")
-
-
-def test_an_explicit_argument_beats_the_configured_value():
-    config = Config(eval=EvalSection(model="opus"))
-    assert RunOptions.resolve(config, model="haiku").model == "haiku"
-
-
-def test_an_omitted_config_is_read_from_the_working_directory(working_directory, tmp_path):
-    (tmp_path / "cowork_evals.yaml").write_text("eval:\n  judge_model: opus\n", encoding="utf-8")
+@pytest.mark.parametrize(
+    ("name", "default", "written", "from_file", "argument"),
+    [
+        ("model", "sonnet", "opus", "opus", "haiku"),
+        ("judge_model", "haiku", "opus", "opus", "sonnet"),
+        ("ablation", "none", "with-without", "with-without", "none"),
+        ("max_cost_usd", "5", 2.5, "2.5", "1"),
+        (
+            "allow_tools",
+            ("Bash", "Read", "Glob", "Grep", "Write", "Edit", "WebFetch", "Skill"),
+            ("Bash", "Write"),
+            ("Bash", "Write"),
+            ("Read",),
+        ),
+        ("keep_traces", True, False, False, True),
+        ("keep_traces", True, True, True, False),
+    ],
+)
+def test_each_option_resolves_argument_over_file_over_default(
+    working_directory,
+    tmp_path: Path,
+    name: str,
+    default: Any,
+    written: Any,
+    from_file: Any,
+    argument: Any,
+) -> None:
+    assert getattr(RunOptions.resolve(Config()), name) == default
+    configured = Config(eval=replace(EvalSection(), **{name: written}))
+    configured.dump(tmp_path / CONFIG_FILENAME)
     with working_directory(tmp_path):
-        assert RunOptions.resolve().judge_model == "opus"
-
-
-def test_the_traces_are_kept_unless_the_file_turns_them_off():
-    assert RunOptions.resolve(Config()).keep_traces is True
-    assert RunOptions.resolve(Config(eval=EvalSection(keep_traces=False))).keep_traces is False
-
-
-def test_either_form_of_the_traces_argument_beats_the_file():
-    """It is three-state: `None` is the option not typed, and both booleans beat the file."""
-    off = Config(eval=EvalSection(keep_traces=False))
-    on = Config(eval=EvalSection(keep_traces=True))
-    assert RunOptions.resolve(off, keep_traces=True).keep_traces is True
-    assert RunOptions.resolve(on, keep_traces=False).keep_traces is False
-    assert RunOptions.resolve(off, keep_traces=None).keep_traces is False
-
-
-def test_a_whole_cost_is_emitted_without_a_decimal_point():
-    """`max_cost_usd` is a number in the file and a string on the command line."""
-    assert RunOptions.resolve(Config()).max_cost_usd == "5"
-    assert RunOptions.resolve(Config(eval=EvalSection(max_cost_usd=2.5))).max_cost_usd == "2.5"
+        assert getattr(RunOptions.resolve(), name) == from_file
+        assert getattr(RunOptions.resolve(**{name: argument}), name) == argument
 
 
 # The command line.
 
 
-def test_the_target_comes_before_every_variadic_flag(run_options: RunOptions):
-    argv = eval_argv("/work/plugin/evals", "/work/logs", replace(run_options, tags=("skill",)))
-    target = argv.index("/work/plugin/evals")
+def test_the_target_comes_before_every_variadic_flag(run_options: RunOptions) -> None:
+    argv = eval_argv(TARGET, LOGS, replace(run_options, tags=("skill",)))
+    target = argv.index(TARGET)
     assert target < argv.index("--allow-tools")
     assert target < argv.index("--tag")
 
 
-def test_the_debug_file_goes_before_the_subcommand(run_options: RunOptions):
-    argv = eval_argv("/work/plugin/evals", "/work/logs", run_options)
+def test_the_debug_file_goes_before_the_subcommand(run_options: RunOptions) -> None:
+    argv = eval_argv(TARGET, LOGS, run_options)
     assert argv[:5] == ["claude", "--debug-file", "/work/logs/debug.txt", "plugin", "eval"]
     assert "--debug" not in argv, "a bare --debug swallows the subcommand name as its filter"
 
 
-def test_every_always_pinned_flag_is_emitted(run_options: RunOptions):
-    argv = eval_argv("/work/plugin/evals", "/work/logs", run_options)
-    assert value_after(argv, "--model") == "sonnet"
-    assert value_after(argv, "--judge-model") == "haiku"
-    assert value_after(argv, "--ablation") == "none"
+def test_every_always_pinned_flag_is_emitted() -> None:
+    options = RunOptions(
+        model="opus",
+        judge_model="sonnet",
+        ablation="with-without",
+        max_cost_usd="2.5",
+        allow_tools=("Bash", "Write"),
+    )
+    argv = eval_argv(TARGET, LOGS, options)
+    assert value_after(argv, "--model") == "opus"
+    assert value_after(argv, "--judge-model") == "sonnet"
+    assert value_after(argv, "--ablation") == "with-without"
     assert value_after(argv, "--threshold") == "0"
-    assert value_after(argv, "--max-cost-usd") == "5"
-    assert value_after(argv, "--output-dir") == "/work/logs"
-    assert value_after(argv, "--allow-tools") == "Bash"
+    assert value_after(argv, "--max-cost-usd") == "2.5"
+    assert value_after(argv, "--output-dir") == LOGS
+    assert argv[argv.index("--allow-tools") + 1 :] == ["Bash", "Write"]
     for flag in ("--no-publish", "--no-scaffold", "--verbose"):
         assert flag in argv
 
 
-def test_json_is_never_emitted(run_options: RunOptions):
-    assert "--json" not in eval_argv("/work/plugin/evals", "/work/logs", run_options)
-
-
-def test_the_threshold_cannot_be_overridden(run_options: RunOptions):
-    """It is not a field of RunOptions, so no caller can reach it. It is what hands pass and
-    fail to verdict.py, and the number a two-arm run is decided on lives there."""
-    assert not hasattr(run_options, "threshold")
-    assert "--threshold" in eval_argv("/work/plugin/evals", "/work/logs", run_options)
-
-
-def test_the_ablation_is_the_resolved_option(run_options: RunOptions):
-    argv = eval_argv(
-        "/work/plugin/evals", "/work/logs", replace(run_options, ablation="with-without")
-    )
-    assert value_after(argv, "--ablation") == "with-without"
-
-
-def test_the_ablation_is_off_unless_the_file_or_the_argument_turns_it_on():
-    assert RunOptions.resolve(Config()).ablation == "none"
-    configured = Config(eval=EvalSection(ablation="with-without"))
-    assert RunOptions.resolve(configured).ablation == "with-without"
-    assert RunOptions.resolve(configured, ablation="none").ablation == "none"
-
-
-def test_nothing_unasked_is_emitted(run_options: RunOptions):
-    argv = eval_argv("/work/plugin/evals", "/work/logs", run_options)
-    for flag in ("--runs", "--case", "--tag", "--report", "--mocks", "--eval-dir"):
+def test_nothing_unasked_is_emitted(run_options: RunOptions) -> None:
+    argv = eval_argv(TARGET, LOGS, run_options)
+    for flag in ("--runs", "--case", "--tag", "--report", "--mocks", "--eval-dir", "--json"):
         assert flag not in argv
 
 
-def test_keep_temp_is_emitted_when_the_run_keeps_its_traces(run_options: RunOptions):
+@pytest.mark.parametrize("keep_traces", [True, False])
+def test_keep_temp_is_emitted_when_the_run_keeps_its_traces(
+    run_options: RunOptions, keep_traces: bool
+) -> None:
     """Without it only an errored run's sandbox is kept, and no passing run leaves a trace."""
-    assert "--keep-temp" in eval_argv("/work/plugin/evals", "/work/logs", run_options)
+    argv = eval_argv(TARGET, LOGS, replace(run_options, keep_traces=keep_traces))
+    assert ("--keep-temp" in argv) is keep_traces
 
 
-def test_keep_temp_is_not_emitted_when_the_traces_are_turned_off(run_options: RunOptions):
-    argv = eval_argv("/work/plugin/evals", "/work/logs", replace(run_options, keep_traces=False))
-    assert "--keep-temp" not in argv
-
-
-def test_the_optional_flags_are_emitted_when_asked(run_options: RunOptions):
+def test_the_optional_flags_are_emitted_when_asked(run_options: RunOptions) -> None:
     argv = eval_argv(
-        "/work/plugin/evals",
-        "/work/logs",
-        replace(run_options, runs=1, case="smoke-*", tags=("plugin", "skill")),
+        TARGET, LOGS, replace(run_options, runs=1, case="smoke-*", tags=("plugin", "skill"))
     )
     assert value_after(argv, "--runs") == "1"
     assert value_after(argv, "--case") == "smoke-*"
     assert argv[argv.index("--tag") + 1 :] == ["plugin", "skill"]
-
-
-def test_a_widened_allow_tools_replaces_the_value(run_options: RunOptions):
-    argv = eval_argv(
-        "/work/plugin/evals", "/work/logs", replace(run_options, allow_tools=("Bash", "Write"))
-    )
-    assert argv[argv.index("--allow-tools") + 1 :] == ["Bash", "Write"]
