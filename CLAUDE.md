@@ -61,6 +61,10 @@ before changing anything under it. Never restate one of these in another file; l
   test, and no library that supplies one is a dependency. No test is skipped, and no `if`
   bypasses the assertions inside one. A test runs against the real thing or it is not
   written. Either rule is lifted only when the developer approves that exception.
+- **Typed data.** Structured data is a dataclass or a Pydantic model, in all code in the
+  repository: the package, the tests and the scripts. JSON is parsed into a model when it is
+  read and serialised from a model when it is written. No `dict` record is built, passed or
+  mutated.
 - **Two tiers of test.** A test is unit and runs by default, or it is marked `integration`
   and is selected with `-m integration`. Integration is for what needs a real CoWork
   profile or a real run, and it is run at the end of a plan and after a merge into `main`.
