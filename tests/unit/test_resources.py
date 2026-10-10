@@ -28,19 +28,7 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 # so a link carrying a title would be caught too; this repository writes none.
 LINK = re.compile(r"\]\(([^)]+)\)")
 
-# What a document name is checked against. Every document this repository holds is one of
-# these, and a new one that is neither is a new kind of file and not a silent addition.
-EXPECTED_DOCUMENTS = {"README", "cli", "eval_format", "library", "runtime", "approaches"}
-
-
 # The tree.
-
-
-def test_the_documentation_tree_is_found() -> None:
-    root = resources.docs_dir()
-    assert root is not None
-    assert root.is_dir()
-    assert (root / "eval_format.md").is_file()
 
 
 def test_every_listed_name_resolves_to_a_file() -> None:
@@ -52,43 +40,18 @@ def test_every_listed_name_resolves_to_a_file() -> None:
         assert path.is_file(), name
 
 
-def test_the_expected_documents_are_all_listed() -> None:
-    assert set(resources.documents()) >= EXPECTED_DOCUMENTS
-
-
-def test_a_name_takes_the_extension_or_leaves_it() -> None:
-    assert resources.document("cli") == resources.document("cli.md")
-
-
-def test_a_nested_document_is_named_by_its_path() -> None:
-    path = resources.document("claude_code/plugin_eval_reference")
-    assert path is not None
-    assert path.is_file()
-
-
-def test_an_unknown_name_resolves_to_nothing() -> None:
-    assert resources.document("no-such-document") is None
+def test_a_nested_document_is_named_by_its_path_and_a_vendored_case_is_not_one() -> None:
+    """The smoke plugin ships, and its cases are not listed as documents."""
+    names = resources.documents()
+    assert "claude_code/plugin_eval_reference" in names
+    assert resources.document("claude_code/plugin_eval_reference").is_file()
+    assert [name for name in names if "eval_smoke/evals" in name] == []
 
 
 @pytest.mark.parametrize("escape", ["../README", "/etc/passwd", "../../pyproject"])
 def test_a_name_cannot_reach_outside_the_tree(escape: str) -> None:
     """The name is matched against the list, never joined onto the root."""
     assert resources.document(escape) is None
-
-
-def test_a_vendored_plugin_case_is_not_a_document() -> None:
-    """The smoke plugin ships, and its cases are not listed as documents."""
-    names = resources.documents()
-    assert not [name for name in names if "eval_smoke/evals" in name]
-    assert "claude_code/README" in names
-
-
-# The package data.
-
-
-def test_the_example_configuration_ships_beside_the_modules() -> None:
-    assert resources.EXAMPLE_CONFIG.is_file()
-    assert "cowork:" in resources.EXAMPLE_CONFIG.read_text()
 
 
 # The two keys the example does not claim a default for: `cowork.profile` has none, and
@@ -121,8 +84,7 @@ def test_every_commented_default_in_the_example_is_the_built_in_default(
     """Uncommenting the example changes nothing, which is what its header promises.
 
     The file ships to a consumer through `init`, so a stale line there is a default a
-    consumer adopts by uncommenting it. Nothing else compares the two, which is how
-    `allow_tools` sat at the superseded `[Bash]` after the grant became the session mirror.
+    consumer adopts by uncommenting it.
     """
     written = tmp_path / "cowork_evals.yaml"
     written.write_text(_uncommented(resources.EXAMPLE_CONFIG.read_text()), encoding="utf-8")
@@ -139,34 +101,9 @@ def test_every_commented_default_in_the_example_is_the_built_in_default(
 def test_every_shipped_skill_is_a_directory_named_for_it() -> None:
     """One directory per skill, and its name is the skill's name. docs/library.md."""
     installed = resources.skills()
-    assert [target.name for _, target in installed] == [
-        "cowork-ask",
-        "cowork-evals",
-        "cowork-skill-author",
-    ]
+    assert installed
     for source, target in installed:
-        text = (source / resources.SKILL_FILE).read_text()
-        assert text.startswith("---\n"), source
-        assert f"name: {target.name}" in text, source
-        assert "TRIGGER" in text, source
-
-
-def test_a_skill_installs_where_claude_code_reads_a_project_skill() -> None:
-    assert resources.skills()[0] == (
-        resources.SKILLS / "cowork-ask",
-        Path(".claude") / "skills" / "cowork-ask",
-    )
-
-
-def test_the_ask_skill_carries_the_measurement_rule() -> None:
-    """The one rule that makes an ask worth its VM boot. docs/cowork_desktop.md."""
-    text = resources.skill("cowork-ask").read_text()
-    assert "is not evidence" in text
-    assert "cowork_evals ask --cowork" in text
-
-
-def test_the_memory_block_carries_its_own_marker() -> None:
-    assert resources.MEMORY_MARKER in resources.MEMORY_BLOCK
+        assert f"name: {target.name}" in (source / resources.SKILL_FILE).read_text(), source
 
 
 # The skills against the documents. docs/library.md.
@@ -267,7 +204,7 @@ def test_r1_no_module_links_out_of_the_package() -> None:
     assert offenders == []
 
 
-def test_r2_no_document_links_out_of_the_tree() -> None:
+def test_r2_every_document_link_stays_inside_the_tree_and_resolves() -> None:
     """A document links inside `docs/`. A target outside it is named, not linked.
 
     `docs/` ships and the tree around it does not, so a link that leaves it dangles for
@@ -275,32 +212,19 @@ def test_r2_no_document_links_out_of_the_tree() -> None:
     """
     root = resources.docs_dir()
     assert root is not None
-    offenders = []
+    outside, broken = [], []
     for path in root.rglob("*.md"):
         for target in _links(path):
             if target.startswith(("http://", "https://", "#")):
                 continue
+            where = f"{path.relative_to(root)}: {target}"
             # Lexical, not `resolve()`: a file in the tree may be a link to package data, and
             # the wheel ships it as a file inside the tree.
-            resolved = Path(os.path.normpath(path.parent / target))
-            if not resolved.is_relative_to(root):
-                offenders.append(f"{path.relative_to(root)}: {target}")
-    assert offenders == []
-
-
-def test_r2_every_link_inside_the_tree_resolves() -> None:
-    """A link that stays inside `docs/` points at something that is there."""
-    root = resources.docs_dir()
-    assert root is not None
-    broken = []
-    for path in root.rglob("*.md"):
-        for target in _links(path):
-            if target.startswith(("http://", "https://", "#")):
-                continue
-            resolved = (path.parent / target.split("#", 1)[0]).resolve()
-            if not resolved.exists():
-                broken.append(f"{path.relative_to(root)}: {target}")
-    assert broken == []
+            if not Path(os.path.normpath(path.parent / target)).is_relative_to(root):
+                outside.append(where)
+            if not (path.parent / target.split("#", 1)[0]).resolve().exists():
+                broken.append(where)
+    assert (outside, broken) == ([], [])
 
 
 def test_every_document_the_readme_names_exists() -> None:

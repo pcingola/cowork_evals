@@ -321,7 +321,8 @@ There is no `--tag` and no `--case`. The columns, the exit codes and the records
 
 `cowork_evals docs` prints the directory this documentation is installed in, then every
 document name. `cowork_evals docs <name>` prints one document's path, and exits 2 on an unknown
-name.
+name. A name is matched against the listed names and never joined onto the directory, so no
+name reaches a file outside it.
 
 ## init
 
