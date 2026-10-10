@@ -173,7 +173,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 
 ## Phase 5: documentation
 
-- [ ] `tests/README.md`: the file table lists the files that remain, `tests/unit/conftest.py` included. Every test count, test name and fixture name in its tier sections and in "The live marker" matches the tests that remain, and every sentence a `plan_tests/` row changes there is written. It states two rules of this plan: one test per requirement, and each test file shorter than its unit. For typed data it links to `CLAUDE.md`.
+- [x] `tests/README.md`: the file table lists the files that remain, `tests/unit/conftest.py` included. Every test count, test name and fixture name in its tier sections and in "The live marker" matches the tests that remain, and every sentence a `plan_tests/` row changes there is written. It states two rules of this plan: one test per requirement, and each test file shorter than its unit. For typed data it links to `CLAUDE.md`.
 - [ ] `CLAUDE.md` working rules: structured data is a dataclass or a Pydantic model in all code in the repository. JSON is parsed into a model when it is read and serialised from one when it is written.
 
 ## Decisions
