@@ -158,7 +158,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 - [x] [`tests/unit/test_logs.py`](plan_tests/unit_test_logs.md). Docs: `docs/running_evals.md` "What a run leaves behind" (the `image` line on `--docker` only, and the `session_env` and `keep_env` lines).
 - [x] [`tests/unit/test_traces.py`](plan_tests/unit_test_traces.md)
 - [x] [`tests/unit/test_verdict.py`](plan_tests/unit_test_verdict.md)
-- [ ] [`tests/unit/test_panel.py`](plan_tests/unit_test_panel.md)
+- [x] [`tests/unit/test_panel.py`](plan_tests/unit_test_panel.md)
 - [ ] [`tests/unit/test_environments.py`](plan_tests/unit_test_environments.md)
 - [ ] [`tests/unit/test_resources.py`](plan_tests/unit_test_resources.md). Docs: `docs/cli.md` "docs" (the name escape).
 - [ ] [`tests/unit/test_cli_docs_init.py`](plan_tests/unit_test_cli_docs_init.md) and [`tests/unit/test_cli.py`](plan_tests/unit_test_cli.md) in one commit, which merges the first file into the second. Docs: `docs/cli.md` "Synopsis" (`--version`).

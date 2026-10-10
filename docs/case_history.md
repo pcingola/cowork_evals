@@ -91,7 +91,9 @@ The definitions come from the case tree at render time, never from a record: a s
 what a case is would drift from the case.
 
 The five columns after the backends come from the row's latest record, whichever backend
-produced it, because that is the most recent measurement of the case. Each backend's newest
+produced it, because that is the most recent measurement of the case. Of each backend's newest
+record, the latest is the one with the newest `startedAt`, and a record with no `startedAt` is
+older than any record with one. Each backend's newest
 record is the last one for it in the file: appending is the only write, so file order is the
 order the records were made in.
 

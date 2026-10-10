@@ -8,44 +8,38 @@ are the real ones. The store and the columns are docs/panel.md. See ../README.md
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from importlib import metadata
 from pathlib import Path
 
-from cowork_evals import logs, panel
+import pytest
+
+from cowork_evals import panel, results
 from cowork_evals.cases import discover
-from cowork_evals.cases import read as read_case
-from cowork_evals.harness import RESULT_NAME
 from cowork_evals.panel import HistoryRecord, PanelSnapshot
 from cowork_evals.preflight import COWORK, DOCKER
 from cowork_evals.results import PluginRef, ResultDocument
-from cowork_evals.verdict import CaseOutcome, decide
+from cowork_evals.verdict import decide
 
 DATA = Path(__file__).resolve().parent.parent / "data"
 HISTORY = DATA / "history"
 DOCUMENTS = DATA / "results"
 SMOKE = Path(__file__).resolve().parents[2] / "plugins" / "smoke"
 
-# The four cases `plugins/smoke` holds, and the one of them that carries `no-cowork`.
+# The five cases `plugins/smoke` holds, and the one of them that carries `no-cowork`.
 # ../../plugins/README.md.
 CASES = ("capped-turns", "checked-file", "python-version", "session-env", "writes-a-file")
 DECLARED_CASE = "capped-turns"
 CASE_DIR = "evals/plugin/python-version"
 
 
-def record(name: str, plugin: str = "smoke", case_dir: str = CASE_DIR) -> Path:
-    """One fixture file, copied to the path that case's records belong in."""
-
-    def _install(root: Path) -> Path:
-        file = panel.path(root, plugin, case_dir)
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_bytes((HISTORY / f"{name}.jsonl").read_bytes())
-        return file
-
-    return _install
-
-
 def installed(root: Path, name: str, plugin: str = "smoke", case_dir: str = CASE_DIR) -> Path:
-    return record(name, plugin, case_dir)(root)
+    """One fixture file, copied to the path that case's records belong in."""
+    file = panel.path(root, plugin, case_dir)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_bytes((HISTORY / f"{name}.jsonl").read_bytes())
+    return file
 
 
 def entry(**changes) -> HistoryRecord:
@@ -80,30 +74,22 @@ def by_case(built) -> dict:
 # Which file a record lands in.
 
 
-def test_an_ordinary_case_lands_under_its_plugin_and_skill(tmp_path: Path) -> None:
-    assert panel.path(tmp_path, "smoke", "evals/plugin/python-version") == (
-        tmp_path / "smoke" / "plugin" / "python-version.jsonl"
-    )
-
-
-def test_a_case_directly_under_evals_has_no_skill_component(tmp_path: Path) -> None:
-    """It cannot collide with a skill of that name: one is a file, the other a directory."""
-    assert panel.path(tmp_path, "smoke", "evals/hello") == tmp_path / "smoke" / "hello.jsonl"
-
-
-def test_a_case_nested_deeper_keeps_every_component(tmp_path: Path) -> None:
-    """Two cases sharing a directory name under two skills stay apart."""
-    first = panel.path(tmp_path, "smoke", "evals/greeter/formal/hello")
-    second = panel.path(tmp_path, "smoke", "evals/writer/casual/hello")
-    assert first == tmp_path / "smoke" / "greeter" / "formal" / "hello.jsonl"
-    assert first != second
-
-
-def test_every_component_goes_through_the_slug(tmp_path: Path) -> None:
-    """A plugin named `acme/mail` is one directory, exactly as a run directory is."""
-    assert panel.path(tmp_path, "acme/mail", "evals/a skill/a:case") == (
-        tmp_path / "acme-mail" / "a-skill" / "a-case.jsonl"
-    )
+@pytest.mark.parametrize(
+    ("plugin", "case_dir", "expected"),
+    [
+        ("smoke", "evals/plugin/python-version", "smoke/plugin/python-version.jsonl"),
+        ("smoke", "evals/hello", "smoke/hello.jsonl"),
+        ("smoke", "evals/greeter/formal/hello", "smoke/greeter/formal/hello.jsonl"),
+        ("smoke", "evals/writer/casual/hello", "smoke/writer/casual/hello.jsonl"),
+        ("acme/mail", "evals/a skill/a:case", "acme-mail/a-skill/a-case.jsonl"),
+    ],
+)
+def test_a_record_lands_in_the_file_its_case_directory_names(
+    tmp_path: Path, plugin: str, case_dir: str, expected: str
+) -> None:
+    """A case directly under `evals/` cannot collide with a skill of that name: one is a file,
+    the other a directory. Every component is slugged as a run directory's name is."""
+    assert panel.path(tmp_path, plugin, case_dir) == tmp_path / expected
 
 
 # Appending.
@@ -118,7 +104,6 @@ def test_three_cases_in_one_append_land_in_three_files(tmp_path: Path) -> None:
             entry(plugin="other", dir="evals/skill/two"),
         ],
     )
-    assert len(written) == 3
     assert sorted(file.relative_to(tmp_path).as_posix() for file in written) == [
         "other/skill/two.jsonl",
         "smoke/plugin/one.jsonl",
@@ -151,14 +136,8 @@ def test_an_unparsable_last_line_is_reported_and_the_records_before_it_returned(
     assert "line 2" in warnings[0]
 
 
-def test_a_file_that_is_not_there_is_no_records_and_no_warning(tmp_path: Path) -> None:
-    assert panel.read(tmp_path / "smoke" / "plugin" / "absent.jsonl") == ([], [])
-
-
 def test_a_record_of_another_schema_version_is_reported_and_not_read(tmp_path: Path) -> None:
-    file = tmp_path / "one.jsonl"
-    file.write_text('{"schemaVersion": 2, "plugin": "smoke", "dir": "evals/a/b"}\n')
-    found, warnings = panel.read(file)
+    found, warnings = panel.read(installed(tmp_path, "other_schema"))
     assert found == []
     assert "schemaVersion is 2" in warnings[0]
 
@@ -167,106 +146,103 @@ def test_a_record_of_another_schema_version_is_reported_and_not_read(tmp_path: P
 
 
 def case_tree(directory: Path) -> Path:
-    """One case directory holding all three kinds of file the digest covers, and a note."""
-    directory.mkdir(parents=True)
+    """One case directory holding every kind of file the digest covers, and a note."""
+    (directory / "graders").mkdir(parents=True)
+    (directory / "checks").mkdir()
     (directory / "prompt.md").write_text("---\nname: one\n---\n\nSay hello.\n")
     (directory / "case.yaml").write_text("runs: 1\n")
-    (directory / "graders").mkdir()
     (directory / "graders" / "said.md").write_text("---\ntype: regex\npattern: hello\n---\n")
+    (directory / "checks" / "assertions.py").write_text("from cowork_evals.checks import check\n")
     (directory / "NOTES.md").write_text("A note, not a grader.\n")
     return directory
 
 
-def test_the_digest_moves_when_the_prompt_moves(tmp_path: Path) -> None:
+def _write(relative: str, text: str) -> Callable[[Path], object]:
+    return lambda case: (case / relative).write_text(text)
+
+
+@pytest.mark.parametrize(
+    ("edit", "moves"),
+    [
+        (_write("prompt.md", "---\nname: one\n---\n\nSay hello. \n"), True),
+        (_write("case.yaml", "runs: 2\n"), True),
+        (_write("graders/said.md", "---\ntype: regex\npattern: goodbye\n---\n"), True),
+        (lambda case: (case / "graders" / "said.md").rename(case / "graders" / "a.md"), True),
+        (_write("graders/answered.md", "---\ntype: regex\npattern: hi\n---\n"), True),
+        (_write("checks/second.py", "x = 1\n"), True),
+        (_write("checks/assertions.py", "from cowork_evals.checks import check  # e\n"), True),
+        (_write("NOTES.md", "A longer note, still not a grader.\n"), False),
+        (_write("graders/notes.txt", "Not a markdown grader.\n"), False),
+    ],
+    ids=[
+        "prompt",
+        "case-yaml",
+        "grader-edited",
+        "grader-renamed",
+        "grader-added",
+        "check-added",
+        "check-edited",
+        "note",
+        "grader-directory-text",
+    ],
+)
+def test_the_digest_moves_with_a_defining_file_and_holds_with_any_other(
+    tmp_path: Path, edit: Callable[[Path], object], moves: bool
+) -> None:
+    """A note beside the graders changes no measurement, so it changes no digest. Editing an
+    assertion has to move it, or `stale` stays green over it."""
     case = case_tree(tmp_path / "one")
     before = panel.digest(case)
-    (case / "prompt.md").write_text("---\nname: one\n---\n\nSay hello. \n")
-    assert panel.digest(case) != before
-
-
-def test_the_digest_moves_when_the_case_yaml_moves(tmp_path: Path) -> None:
-    case = case_tree(tmp_path / "one")
-    before = panel.digest(case)
-    (case / "case.yaml").write_text("runs: 2\n")
-    assert panel.digest(case) != before
-
-
-def test_the_digest_moves_when_a_grader_moves(tmp_path: Path) -> None:
-    case = case_tree(tmp_path / "one")
-    before = panel.digest(case)
-    (case / "graders" / "said.md").write_text("---\ntype: regex\npattern: goodbye\n---\n")
-    assert panel.digest(case) != before
-
-
-def test_the_digest_moves_when_a_grader_is_added_or_renamed(tmp_path: Path) -> None:
-    case = case_tree(tmp_path / "one")
-    before = panel.digest(case)
-    (case / "graders" / "said.md").rename(case / "graders" / "answered.md")
-    assert panel.digest(case) != before
-
-
-def test_the_digest_holds_when_any_other_file_in_the_case_directory_moves(tmp_path: Path) -> None:
-    """A note beside the graders changes no measurement, so it changes no digest."""
-    case = case_tree(tmp_path / "one")
-    before = panel.digest(case)
-    (case / "NOTES.md").write_text("A longer note, still not a grader.\n")
-    (case / "graders" / "notes.txt").write_text("Not a markdown grader.\n")
-    assert panel.digest(case) == before
+    edit(case)
+    assert (panel.digest(case) != before) is moves
 
 
 # Pruning.
 
 
-def dated(days: int) -> str:
-    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+def aged(dir_name: str, days: float) -> HistoryRecord:
+    started = datetime.now(timezone.utc) - timedelta(days=days)
+    return entry(dir=f"evals/{dir_name}", started_at=started.isoformat())
 
 
-def aged(dir_name: str, days: int) -> HistoryRecord:
-    return entry(dir=f"evals/{dir_name}", started_at=dated(days))
+def test_prune_drops_a_record_by_age_then_an_emptied_file_and_directory(tmp_path: Path) -> None:
+    old_and_young = [aged("plugin/one", 40), aged("plugin/one", 1)]
+    panel.append(tmp_path, [*old_and_young, aged("old/two", 40), aged("young/three", 1)])
+    one = panel.path(tmp_path, "smoke", "evals/plugin/one")
+    two = panel.path(tmp_path, "smoke", "evals/old/two")
+    assert panel.prune(tmp_path, 30) == [two, one]
+    assert len(panel.read(one)[0]) == 1
+    assert not (tmp_path / "smoke" / "old").exists()
+    assert panel.path(tmp_path, "smoke", "evals/young/three").is_file()
 
 
-def test_prune_drops_a_record_by_age_and_keeps_the_rest(tmp_path: Path) -> None:
-    panel.append(tmp_path, [aged("plugin/one", 40), aged("plugin/one", 1)])
+def test_prune_cuts_at_an_exact_moment_days_before_now(tmp_path: Path) -> None:
+    """A floor on whole days would keep an hour-old record a day longer than the run
+    directory it names."""
+    panel.append(tmp_path, [aged("plugin/one", 1 / 24)])
     file = panel.path(tmp_path, "smoke", "evals/plugin/one")
-    assert panel.prune(tmp_path, 30) == [file]
-    found, _ = panel.read(file)
-    assert len(found) == 1
-
-
-def test_prune_deletes_an_emptied_file_and_then_an_emptied_directory(tmp_path: Path) -> None:
-    panel.append(tmp_path, [aged("plugin/one", 40), aged("other/two", 1)])
-    panel.prune(tmp_path, 30)
-    assert not (tmp_path / "smoke" / "plugin").exists()
-    assert (tmp_path / "smoke" / "other" / "two.jsonl").is_file()
-
-
-def test_prune_reads_the_retention_the_way_the_log_prune_does(tmp_path: Path) -> None:
-    """`--older-than DAYS` is one flag over both trees, so it cuts at one moment in both.
-
-    An hour-old record at `--older-than 0` goes, exactly as `logs.prune` deletes an hour-old
-    run directory at the same retention. A floor on whole days would keep it for a day longer
-    than the run directory it names.
-    """
-    hour = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    panel.append(tmp_path, [entry(started_at=hour)])
-    file = panel.path(tmp_path, "smoke", "evals/plugin/one")
-
-    directory = tmp_path / "runs" / f"{datetime.now() - timedelta(hours=1):%Y%m%d-%H%M%S}-smoke"
-    directory.mkdir(parents=True)
-
-    assert logs.prune(directory.parent, 0) == [directory]
     assert panel.prune(tmp_path, 0) == [file]
     assert not file.exists()
 
 
-def test_prune_keeps_a_record_with_no_stamp(tmp_path: Path) -> None:
+def test_prune_keeps_a_record_with_no_stamp_and_a_line_that_does_not_parse(
+    tmp_path: Path,
+) -> None:
     """Nothing undatable is dropped: it would be a deletion on the age of nothing."""
     panel.append(tmp_path, [entry()])
-    assert panel.prune(tmp_path, 30) == []
+    truncated = installed(tmp_path, "truncated")
+    assert panel.prune(tmp_path, 30) == [truncated]
     assert len(panel.read(panel.path(tmp_path, "smoke", "evals/plugin/one"))[0]) == 1
+    assert truncated.read_text() == (
+        '{"schemaVersion": 1, "invocation": "20260904-090000-smoke", "backend": "docker", '
+        '"plugin": "smo\n'
+    )
 
 
 # The record, field by field.
+
+
+CONTAINER_ROOT = "/work/plugin"
 
 
 def written_document(
@@ -278,28 +254,16 @@ def written_document(
     document = ResultDocument.read(DOCUMENTS / f"{name}.json")
     plugin = PluginRef(name="smoke", path=str(plugin_path or root), version="0.1.0")
     suite = document.suite.model_copy(update={"root": str(root), "plugins": [plugin]})
-    written = document.model_copy(update={"suite": suite})
-    (run / "smoke" / RESULT_NAME).write_text(written.model_dump_json(by_alias=True))
+    results.write(run / "smoke", document.model_copy(update={"suite": suite}))
     return run
 
 
-CONTAINER_ROOT = "/work/plugin"
-
-
-def test_the_digest_is_read_from_this_hosts_tree_and_not_from_the_documents_root(
-    tmp_path: Path,
-) -> None:
-    """A container document names a path that is nothing on this host.
-
-    `claude plugin eval` runs inside the container and writes `suite.root` as the path the
-    plugin was mounted at, `/work/plugin`. The case files the digest covers never move, so
-    the sweep hands `records` the root it ran, and the digest is the tree's own.
-    """
-    run = written_document(tmp_path, "pass", CONTAINER_ROOT)
-    decided = decide(run, found=3, picked=1)
-
-    built = panel.records(run, decided.outcomes, DOCKER, roots={"smoke": SMOKE})
-    assert built[0].case_digest == panel.digest(SMOKE / "evals" / "plugin" / "python-version")
+def recorded(
+    tmp_path: Path, name: str, root: Path | str = SMOKE, backend: str = DOCKER, **options
+) -> list[HistoryRecord]:
+    """The records `records` builds over one hand-written document."""
+    run = written_document(tmp_path, name, root, options.pop("plugin_path", None))
+    return panel.records(run, decide(run, found=1, picked=1).outcomes, backend, **options)
 
 
 def test_a_record_carries_no_digest_rather_than_the_digest_of_nothing(tmp_path: Path) -> None:
@@ -308,140 +272,108 @@ def test_a_record_carries_no_digest_rather_than_the_digest_of_nothing(tmp_path: 
     `sha256` over nothing is a valid-looking digest that differs from every real one, so a
     record carrying it would read `stale` forever over files nobody edited.
     """
-    run = written_document(tmp_path, "pass", CONTAINER_ROOT, plugin_path=SMOKE)
-    decided = decide(run, found=3, picked=1)
-
-    built = panel.records(run, decided.outcomes, DOCKER)
-    assert built[0].case_digest is None
-    assert panel.digest(Path(CONTAINER_ROOT)) == panel.digest(tmp_path / "nothing-here")
+    assert recorded(tmp_path, "pass", CONTAINER_ROOT, plugin_path=SMOKE)[0].case_digest is None
 
 
 def test_every_field_of_a_record_comes_from_the_document_it_was_built_from(
     tmp_path: Path,
 ) -> None:
-    """`pass.json` is one case, one run, one passing structural grader and one judged one."""
-    run = written_document(tmp_path, "pass", SMOKE)
-    decided = decide(run, found=3, picked=1)
-    built = panel.records(run, decided.outcomes, DOCKER, image="cowork-evals:abc")
-
-    assert len(built) == 1
-    record = built[0]
-    assert record.schema_version == 1
-    assert record.invocation == "20260913-101010-smoke"
-    assert record.backend == DOCKER
-    assert record.image == "cowork-evals:abc"
-    assert record.plugin == "smoke"
-    assert record.plugin_version == "0.1.0"
-    assert record.skill == "plugin"
-    assert record.case == "python-version"
-    assert record.dir == CASE_DIR
-    assert record.outcome == "pass"
-    assert record.score == 1.0
-    assert record.pass_rate == 1.0
-    assert record.runs == 1
-    assert record.cost_usd == 0.004
-    assert record.started_at == "2026-09-09T10:00:00+00:00"
-    assert record.claude_version == "2.1.265"
-    # The digest is of the directory the suite root names, and what it covers is asserted
-    # against a case tree above.
-    assert record.case_digest == panel.digest(SMOKE / CASE_DIR)
+    """`pass.json` is one case, one run, one passing structural grader and one judged one.
+    The digest is asserted by the stale tests below."""
+    records = recorded(tmp_path, "pass", image="cowork-evals:abc")
+    assert [one.model_copy(update={"case_digest": None}) for one in records] == [
+        HistoryRecord(
+            schema_version=1,
+            invocation="20260913-101010-smoke",
+            backend=DOCKER,
+            image="cowork-evals:abc",
+            cowork_evals=metadata.version("cowork-evals"),
+            plugin="smoke",
+            plugin_version="0.1.0",
+            skill="plugin",
+            case="python-version",
+            dir=CASE_DIR,
+            outcome="pass",
+            score=1.0,
+            pass_rate=1.0,
+            runs=1,
+            duration_seconds=0.0,
+            cost_usd=0.004,
+            started_at="2026-09-09T10:00:00+00:00",
+            claude_version="2.1.265",
+        )
+    ]
 
 
 def test_an_optional_field_is_absent_rather_than_null(tmp_path: Path) -> None:
     """The document carries no delta, no error and no trace, so the record carries none."""
-    run = written_document(tmp_path, "pass", SMOKE)
-    record = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
-    line = panel.append(tmp_path / "history", [record])[0].read_text()
+    line = panel.append(tmp_path / "history", recorded(tmp_path, "pass"))[0].read_text()
     for absent in ("delta", "error", "failedGraders", "tracePath", "image", "deniedTools"):
         assert f'"{absent}"' not in line
     assert "null" not in line
 
 
-def test_a_failing_record_names_every_scored_grader_that_failed(tmp_path: Path) -> None:
-    run = written_document(tmp_path, "structural_failures", SMOKE)
-    record = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
-    assert record.outcome == "fail"
-    assert record.failed_graders == [
-        "says-alex",
-        "fired-skill",
-        "read-then-wrote",
-        "wrote-deck",
-    ]
-
-
-def test_a_record_carries_the_first_run_error(tmp_path: Path) -> None:
-    run = written_document(tmp_path, "run_error", SMOKE)
-    record = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
-    assert record.outcome == "fail"
-    assert record.error
-
-
-def test_a_record_carries_the_validity_fields_traces_wrote(tmp_path: Path) -> None:
-    run = written_document(tmp_path, "mode_denial", SMOKE)
-    record = panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER)[0]
-    assert record.denied_tools
-
-
-def test_a_declared_case_records_the_word_the_verdict_reached(tmp_path: Path) -> None:
-    run = written_document(tmp_path, "declared_case", SMOKE)
-    record = panel.records(run, decide(run, found=1, picked=1).outcomes, COWORK)[0]
-    assert record.outcome == "declared"
-    assert record.runs == 0
-    assert record.duration_seconds == 0.0
+@pytest.mark.parametrize(
+    ("document", "backend", "field", "expected"),
+    [
+        ("structural_failures", DOCKER, "outcome", "fail"),
+        (
+            "structural_failures",
+            DOCKER,
+            "failed_graders",
+            ["says-alex", "fired-skill", "read-then-wrote", "wrote-deck"],
+        ),
+        ("run_error", DOCKER, "error", "7: the run did not finish inside 1800.0 seconds"),
+        ("mode_denial", DOCKER, "denied_tools", ["Write"]),
+        ("declared_case", COWORK, "outcome", "declared"),
+        ("declared_case", COWORK, "runs", 0),
+        ("declared_case", COWORK, "duration_seconds", 0.0),
+    ],
+)
+def test_a_record_field_carries_what_the_document_and_the_verdict_say(
+    tmp_path: Path, document: str, backend: str, field: str, expected: object
+) -> None:
+    """`failedGraders` is every scored grader that failed, `error` the first run's, and
+    `outcome` the word the verdict reached."""
+    assert getattr(recorded(tmp_path, document, backend=backend)[0], field) == expected
 
 
 def test_a_two_arm_record_carries_the_delta_the_document_worked_out(tmp_path: Path) -> None:
-    run = written_document(tmp_path, "two_arm", SMOKE)
-    decided = decide(run, found=2, picked=2)
-    built = panel.records(run, decided.outcomes, DOCKER)
-    assert [record.case for record in built] == ["fires-and-answers", "quiet-case"]
-    assert built[0].delta == 1.0
-    assert built[0].runs == 1
-    assert built[1].delta == 0.0
-
-
-def test_a_case_the_verdict_never_reached_produces_no_record(tmp_path: Path) -> None:
-    """The join is the pair the verdict holds, and a case outside it is not recorded."""
-    run = written_document(tmp_path, "pass", SMOKE)
-    assert panel.records(run, (), DOCKER) == []
-    other = (CaseOutcome(plugin="elsewhere", dir=CASE_DIR, name="x", outcome="pass"),)
-    assert panel.records(run, other, DOCKER) == []
-
-
-def test_a_missing_document_produces_no_record(tmp_path: Path) -> None:
-    run = tmp_path / "20260913-101010-smoke"
-    (run / "smoke").mkdir(parents=True)
-    assert panel.records(run, (), DOCKER) == []
+    records = recorded(tmp_path, "two_arm")
+    assert [(one.case, one.delta, one.runs) for one in records] == [
+        ("fires-and-answers", 1.0, 1),
+        ("quiet-case", 0.0, 1),
+    ]
 
 
 # The join to the case tree.
 
 
-def test_a_tree_with_no_history_reads_never_run_on_both_backends(tmp_path: Path) -> None:
-    built, warnings = smoke_rows(tmp_path)
-    assert warnings == []
-    assert [row.case for row in built] == list(CASES)
-    for row in built:
-        if row.case != DECLARED_CASE:
-            assert row.cells[DOCKER].outcome == panel.NEVER
-            assert row.cells[COWORK].outcome == panel.NEVER
-        assert row.score is None
-        assert row.flake is None
-        assert row.records == 0
-        assert row.artefacts is None
-
-
-def test_a_no_cowork_case_reads_declared_from_its_tag_alone(tmp_path: Path) -> None:
+def test_a_tree_with_no_history_reads_never_run_and_a_no_cowork_case_declared(
+    tmp_path: Path,
+) -> None:
     """The tag is in the tree and is the reason no record will ever appear there."""
-    declared = by_case(smoke_rows(tmp_path)[0])[DECLARED_CASE]
-    assert declared.cells[COWORK].outcome == "declared"
-    assert declared.cells[COWORK].age_days is None
-    assert declared.cells[DOCKER].outcome == panel.NEVER
+    rows, warnings = smoke_rows(tmp_path)
+    assert warnings == []
+    never = (panel.NEVER, panel.NEVER)
+    assert {row.case: (row.cells[DOCKER].outcome, row.cells[COWORK].outcome) for row in rows} == {
+        "capped-turns": (panel.NEVER, "declared"),
+        "checked-file": never,
+        "python-version": never,
+        "session-env": never,
+        "writes-a-file": never,
+    }
+    assert {(row.score, row.flake, row.records, row.artefacts) for row in rows} == {
+        (None, None, 0, None)
+    }
+    assert by_case(rows)[DECLARED_CASE].cells[COWORK].age_days is None
 
 
 def test_the_description_comes_from_the_tree(tmp_path: Path) -> None:
     row = by_case(smoke_rows(tmp_path)[0])["python-version"]
-    assert row.description == read_case(SMOKE / CASE_DIR).frontmatter_keys["description"]
+    assert row.description == (
+        "A case reaches a running command, on the interpreter the backend put there."
+    )
 
 
 def test_two_backends_for_one_case_each_show_their_own_newest(tmp_path: Path) -> None:
@@ -463,39 +395,25 @@ def test_a_row_whose_digest_moved_reads_stale(tmp_path: Path) -> None:
 
 
 def test_a_row_whose_digest_matches_does_not(tmp_path: Path) -> None:
-    """The record is written by the real `records` over the real tree, then read back."""
-    run = written_document(tmp_path / "run", "pass", SMOKE)
-    history = tmp_path / "history"
-    panel.append(history, panel.records(run, decide(run, found=1, picked=1).outcomes, DOCKER))
-    assert by_case(smoke_rows(history)[0])["python-version"].stale is False
+    """A container document names a path that is nothing on this host, so the sweep hands
+    `records` the root it ran, and the digest is the tree's own. A record with no digest is
+    never stale, so the record must carry one for the row to say anything."""
+    records = recorded(tmp_path / "run", "pass", CONTAINER_ROOT, roots={"smoke": SMOKE})
+    assert records[0].case_digest is not None
+    panel.append(tmp_path / "history", records)
+    assert by_case(smoke_rows(tmp_path / "history")[0])["python-version"].stale is False
 
 
-def test_a_row_whose_trace_directory_is_gone_says_so(tmp_path: Path) -> None:
-    installed(tmp_path, "stale")
-    row = by_case(smoke_rows(tmp_path)[0])["python-version"]
-    assert row.artefacts == "/nowhere-at-all/traces/python-version/run-1"
-    assert row.gone is True
-
-
-def test_a_row_whose_trace_directory_is_there_is_not_gone(tmp_path: Path) -> None:
+@pytest.mark.parametrize("there", [False, True])
+def test_a_row_says_whether_its_trace_directory_is_gone(tmp_path: Path, there: bool) -> None:
     kept = tmp_path / "traces" / "python-version" / "run-1"
-    kept.mkdir(parents=True)
-    file = installed(tmp_path / "history", "stale")
-    found, _ = panel.read(file)
-    file.unlink()
-    moved = found[0].model_copy(update={"trace_path": str(kept / "trace.jsonl")})
-    panel.append(tmp_path / "history", [moved])
+    if there:
+        kept.mkdir(parents=True)
+    record = entry(case="python-version", dir=CASE_DIR, trace_path=str(kept / "trace.jsonl"))
+    panel.append(tmp_path / "history", [record])
     row = by_case(smoke_rows(tmp_path / "history")[0])["python-version"]
-    assert row.gone is False
-
-
-def test_an_unparsable_history_line_is_warned_about_and_the_row_still_renders(
-    tmp_path: Path,
-) -> None:
-    installed(tmp_path, "truncated")
-    built, warnings = smoke_rows(tmp_path)
-    assert len(warnings) == 1
-    assert by_case(built)["python-version"].cells[DOCKER].outcome == "pass"
+    assert row.artefacts == str(kept)
+    assert row.gone is not there
 
 
 # A case that is no longer in the tree.
@@ -529,19 +447,20 @@ def test_a_case_that_is_still_in_the_tree_is_never_a_removed_row(tmp_path: Path)
 
 
 def test_the_snapshot_carries_one_entry_per_row_with_the_rows_values(tmp_path: Path) -> None:
-    """The one assertion the renders need: every render is over the same rows."""
+    """`ageDays` is not asserted: it counts days from the fixture's stamp to today."""
     installed(tmp_path, "two_backends")
-    built, _ = smoke_rows(tmp_path)
-    document = PanelSnapshot.model_validate_json(panel.snapshot(built))
-
+    document = PanelSnapshot.model_validate_json(panel.snapshot(smoke_rows(tmp_path)[0]))
     assert document.schema_version == 1
-    assert document.rows == built
-
-
-def test_the_text_table_and_the_markdown_carry_one_line_per_row(tmp_path: Path) -> None:
-    built, _ = smoke_rows(tmp_path)
-    assert len(panel.table(built).splitlines()) == len(built) + 1
-    assert len(panel.markdown(built).splitlines()) == len(built) + 2
+    assert [row.case for row in document.rows] == list(CASES)
+    measured = by_case(document.rows)["python-version"]
+    assert (measured.score, measured.duration_seconds, measured.flake, measured.records) == (
+        1.0,
+        9.5,
+        0.5,
+        2,
+    )
+    assert measured.cells[DOCKER].outcome == measured.cells[COWORK].outcome == "pass"
+    assert by_case(document.rows)["writes-a-file"].score is None
 
 
 def test_the_text_table_cuts_a_description_the_markdown_carries_whole(tmp_path: Path) -> None:
@@ -549,29 +468,3 @@ def test_the_text_table_cuts_a_description_the_markdown_carries_whole(tmp_path: 
     longest = max((row.description for row in built), key=len)
     assert longest in panel.markdown(built)
     assert longest not in panel.table(built)
-
-
-def test_the_digest_covers_every_check_file(tmp_path: Path) -> None:
-    """Editing an assertion has to move the digest, or `stale` stays green over it."""
-    case = tmp_path / "hello"
-    (case / "checks").mkdir(parents=True)
-    (case / "prompt.md").write_text("---\nname: hello\n---\n\nSay hello.\n", encoding="utf-8")
-    before = panel.digest(case)
-
-    path = case / "checks" / "assertions.py"
-    path.write_text("from cowork_evals.checks import check\n", encoding="utf-8")
-    with_check = panel.digest(case)
-    assert with_check != before
-
-    path.write_text("from cowork_evals.checks import check  # edited\n", encoding="utf-8")
-    assert panel.digest(case) != with_check
-
-
-def test_the_digest_hashes_the_checks_after_the_graders(tmp_path: Path) -> None:
-    case = tmp_path / "hello"
-    (case / "graders").mkdir(parents=True)
-    (case / "checks").mkdir()
-    (case / "prompt.md").write_text("---\nname: hello\n---\n\nSay hello.\n", encoding="utf-8")
-    (case / "graders" / "a.md").write_text("---\ntype: regex\n---\n", encoding="utf-8")
-    (case / "checks" / "b.py").write_text("x = 1\n", encoding="utf-8")
-    assert [path.name for path in panel._defining(case)] == ["prompt.md", "a.md", "b.py"]

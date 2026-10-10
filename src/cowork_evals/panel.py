@@ -23,6 +23,7 @@ import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
+from math import inf
 from pathlib import Path
 from typing import Any
 
@@ -663,12 +664,13 @@ def _most_recent(latest: Iterable[HistoryRecord | None]) -> HistoryRecord | None
     """The newest of the per-backend newest, by the stamp each carries.
 
     It is what the row's numbers come from: the panel answers what is known about the case
-    now, and that is the most recent measurement of it whichever backend made it.
+    now, and that is the most recent measurement of it whichever backend made it. A record
+    with no stamp is older than every record with one.
     """
     records = [record for record in latest if record]
     if not records:
         return None
-    return max(records, key=lambda record: (_when(record) or datetime.min).timestamp())
+    return max(records, key=lambda record: when.timestamp() if (when := _when(record)) else -inf)
 
 
 def _cell(backend: str, record: HistoryRecord | None, case: Case | None) -> Cell:
