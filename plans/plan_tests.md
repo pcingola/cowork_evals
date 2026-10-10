@@ -153,7 +153,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 - [x] [`tests/unit/test_docker.py`](plan_tests/unit_test_docker.md). Docs: `docs/docker.md` "Environment passthrough" (the Bedrock names in the conditions table).
 - [x] [`tests/unit/test_parity.py`](plan_tests/unit_test_parity.md)
 - [x] [`tests/unit/test_pytest_image.py`](plan_tests/unit_test_pytest_image.md)
-- [ ] [`tests/integration/test_pytest_image.py`](plan_tests/integration_test_pytest_image.md)
+- [x] [`tests/integration/test_pytest_image.py`](plan_tests/integration_test_pytest_image.md)
 - [ ] [`tests/unit/test_preflight.py`](plan_tests/unit_test_preflight.md), with `preflight.checks_all` deleted.
 - [ ] [`tests/unit/test_logs.py`](plan_tests/unit_test_logs.md). Docs: `docs/running_evals.md` "What a run leaves behind" (the `image` line on `--docker` only, and the `session_env` and `keep_env` lines).
 - [ ] [`tests/unit/test_traces.py`](plan_tests/unit_test_traces.md)

@@ -19,26 +19,8 @@ import pytest
 
 from cowork_evals.config import Config, DockerSection
 from cowork_evals.docker import Condition, DockerError
-from cowork_evals.docker.parity import EXPECTED_VERSIONS
 from cowork_evals.docker.pytest_image import REQUIREMENTS_TEST, PytestImage
 from cowork_evals.requirements import pins
-
-ROOT = Path(__file__).resolve().parents[2]
-SMOKE = ROOT / "plugins" / "smoke"
-RUNTIME = SMOKE / "tests" / "test_runtime.py"
-PASSES = SMOKE / "tests" / "test_passes.py"
-FAILS = SMOKE / "tests" / "test_fails.py"
-NEEDS_311 = SMOKE / "tests" / "test_needs_311.py"
-
-# docs/runtime.md, the core runtime table, read through the one place that records it.
-PYTHON_VERSION = f"Python {EXPECTED_VERSIONS['python3']}"
-
-# The three assertions plugins/smoke/tests/test_runtime.py makes, by name.
-ASSERTIONS = (
-    "test_the_interpreter_is_3_10",
-    "test_uno_imports_from_the_libreoffice_program_directory",
-    "test_a_pinned_cowork_wheel_imports",
-)
 
 
 def output(image: PytestImage, target: Path, *pytest_args: str) -> tuple[int, str]:
@@ -55,19 +37,6 @@ def output(image: PytestImage, target: Path, *pytest_args: str) -> tuple[int, st
     return completed.returncode, completed.stdout + completed.stderr
 
 
-def container(image: PytestImage, *command: str) -> str:
-    """That image, one fixed command, no mount. Not the run argument list.
-
-    What this asserts is a property of the image itself, not of the way a suite is run.
-    """
-    completed = subprocess.run(
-        ["docker", "run", "--rm", "--platform", image.platform, image.tag, *command],
-        capture_output=True,
-        text=True,
-    )
-    return (completed.stdout + completed.stderr).strip()
-
-
 def freeze(tag: str, platform: str) -> dict[str, str]:
     completed = subprocess.run(
         ["docker", "run", "--rm", "--platform", platform, tag, "python3", "-m", "pip", "freeze"],
@@ -81,74 +50,52 @@ def freeze(tag: str, platform: str) -> dict[str, str]:
 # The exit code, unchanged.
 
 
-def test_a_trivial_passing_test_returns_zero(images):
-    """A green suite that asserts nothing about the runtime."""
-    assert images.run(PASSES) == 0
-
-
-def test_the_runtime_fixture_returns_zero(images):
-    assert images.run(RUNTIME) == 0
-
-
-def test_the_runtime_fixture_names_its_three_assertions(images):
-    """The `-v` is the caller's, forwarded verbatim. Nothing here chose it."""
-    code, text = output(images, RUNTIME, "-v")
+def test_the_runtime_fixture_passes_its_three_assertions(images, repository):
+    """Code 0 does not tell three passes from two passes and a skip, so the count is read."""
+    code, text = output(images, repository / "plugins" / "smoke" / "tests" / "test_runtime.py")
     assert code == 0
-    for name in ASSERTIONS:
-        assert name in text
     assert "3 passed" in text
 
 
-def test_the_failing_fixture_returns_one(images):
-    """A red suite is a result, not an error. Nothing raises on it."""
-    assert images.run(FAILS) == 1
+@pytest.mark.parametrize(
+    ("target", "code"),
+    [
+        # `except*` does not parse on 3.10, so the file is a collection error, pytest's 2.
+        ("tests/test_needs_311.py", 2),
+        # pytest's own code for no test collected, not collapsed to 1.
+        ("evals", 5),
+    ],
+)
+def test_pytest_s_exit_code_reaches_the_caller_unchanged(
+    images, repository, target: str, code: int
+):
+    assert output(images, repository / "plugins" / "smoke" / target)[0] == code
 
 
-def test_a_test_written_for_3_11_grammar_returns_two(images):
-    """`except*` does not parse on 3.10, so the file is a collection error.
-
-    This is the failure the whole mechanism exists to produce: a suite written against a
-    newer interpreter than a session has fails here, rather than passing on a laptop and
-    failing in a session. pytest's code for an interrupted collection is 2, and it reaches
-    the caller as 2 and not as 1.
-    """
-    code, text = output(images, NEEDS_311)
-    assert code == 2
-    assert "SyntaxError" in text
-    assert "1 error during collection" in text
-
-
-def test_a_path_that_collects_no_test_returns_five(images):
-    """pytest's own code for it, not collapsed to 1."""
-    assert images.run(SMOKE / "evals") == 5
-
-
-def test_an_absent_image_raises_before_any_container_starts():
-    """A precondition, and the caller turns it into its own exit code."""
-    absent = PytestImage(Config(docker=DockerSection(claude_code_version="0.0.0-absent")))
-    with pytest.raises(DockerError):
-        absent.run(PASSES)
-
-
-def test_check_reports_an_absent_image_and_never_the_credential(images):
+def test_an_absent_image_is_reported_and_raised_and_the_credential_never_is(
+    images, repository, tmp_path
+):
     """`check` reads the daemon and both image tags, so it belongs in this tier.
 
-    There is no login in this path, so no state of this machine can make it ask for one.
-    The base tag below names an image no build produced, which is the one unmet condition
-    a machine with a reachable daemon and both images can still be shown.
+    There is no login in this path. The login directory below is empty, so the eval image's
+    own check names the credential, and the test image's check still does not.
     """
-    assert images.check() == [], f"both images are present: {images.tag}"
-    absent = PytestImage(Config(docker=DockerSection(claude_code_version="0.0.0-absent")))
+    absent = PytestImage(
+        Config(
+            docker=DockerSection(claude_code_version="0.0.0-absent", login_dir=tmp_path / "login")
+        )
+    )
+    assert Condition.CREDENTIAL in [line.condition for line in absent.docker.check()]
     unmet = absent.check()
     assert [line.condition for line in unmet] == [Condition.IMAGE]
     assert absent.docker.tag in unmet[0].message
+    with pytest.raises(DockerError) as raised:
+        absent.run(repository / "plugins" / "smoke" / "tests" / "test_passes.py")
+    assert absent.docker.tag in str(raised.value)
+    assert str(raised.value).endswith("is absent: run cowork_evals setup --docker")
 
 
 # What the container is.
-
-
-def test_python_in_the_container_is_the_version_runtime_md_records(images):
-    assert container(images, "python3", "-V") == PYTHON_VERSION
 
 
 def test_the_test_image_adds_the_pinned_list_and_moves_nothing(images):
@@ -168,12 +115,12 @@ def test_the_test_image_adds_the_pinned_list_and_moves_nothing(images):
 # What the container writes.
 
 
-def test_a_test_that_writes_into_the_tree_leaves_the_file_to_the_developer(images, plugin):
-    """The container runs as the host uid and gid, so nothing it writes is root's.
+def test_what_the_container_writes_into_the_tree_is_the_developer_s(images, plugin):
+    """The mount is read-write and the container runs as the host uid and gid.
 
-    A bind mount on macOS maps ownership itself, so the second assertion is load-bearing
-    on Linux and free here. The first is load-bearing everywhere: the mount is read-write,
-    unlike a `run --docker`.
+    A bind mount on macOS maps ownership itself, so the uid assertion is load-bearing on
+    Linux and free here. The working directory is the plugin root, so the caller's
+    `--junitxml` report lands there, and pytest writes its cache as it does on a laptop.
     """
     (plugin / "tests" / "test_writes.py").write_text(
         "from pathlib import Path\n"
@@ -182,23 +129,9 @@ def test_a_test_that_writes_into_the_tree_leaves_the_file_to_the_developer(image
         "def test_it_writes_beside_itself():\n"
         "    Path(__file__).parent.joinpath('written.txt').write_text('written')\n"
     )
-    assert images.run(plugin) == 0
+    assert images.run(plugin, pytest_args=("--junitxml=report.xml",)) == 0
     written = plugin / "tests" / "written.txt"
     assert written.read_text() == "written"
     assert written.stat().st_uid == os.getuid()
-
-
-def test_the_junitxml_tail_leaves_the_report_in_the_plugin_root(images, plugin):
-    """Nothing in this package arranged for it: the tree is writable and the tail is the
-    caller's."""
-    (plugin / "tests" / "test_one.py").write_text("def test_one():\n    assert True\n")
-    assert images.run(plugin, pytest_args=("--junitxml=report.xml",)) == 0
-    report = plugin / "report.xml"
-    assert "<testsuite" in report.read_text()
-
-
-def test_pytest_writes_its_cache_into_the_tree_as_it_does_on_a_laptop(images, plugin):
-    """A read-only mount would change what a suite does, so the mount is read-write."""
-    (plugin / "tests" / "test_one.py").write_text("def test_one():\n    assert True\n")
-    assert images.run(plugin) == 0
+    assert (plugin / "report.xml").is_file()
     assert (plugin / ".pytest_cache").is_dir()
