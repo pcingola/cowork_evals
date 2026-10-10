@@ -87,14 +87,15 @@ class TraceRecord(BaseModel):
     """One line of a harness `trace.jsonl`, as far as this module reads it.
 
     The stream carries keys nothing here reads, such as `session_id` and `uuid`, and they are
-    ignored.
+    ignored. `message` is the API message on a conversation record and a plain string on a
+    `permission_denied` record.
     """
 
     model_config = ConfigDict(extra="ignore")
 
     type: str
     subtype: str | None = None
-    message: Message | None = None
+    message: Message | str | None = None
     result: str | None = None
     tools: list[str] | None = None
     tool_name: str | None = None
@@ -550,7 +551,7 @@ def _final(records: list[TraceRecord]) -> str | None:
 
 def _assistant_text(record: TraceRecord) -> str:
     """The text blocks of one assistant record, joined. A thinking block is not text."""
-    if record.message is None:
+    if not isinstance(record.message, Message):
         return ""
     if isinstance(record.message.content, str):
         return record.message.content

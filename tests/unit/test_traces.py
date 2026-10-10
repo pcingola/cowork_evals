@@ -440,7 +440,11 @@ def init(tools: list[str] = OFFERED) -> TraceRecord:
 
 def denial(tool: str, reason: str = "mode") -> TraceRecord:
     return TraceRecord(
-        type="system", subtype="permission_denied", tool_name=tool, decision_reason_type=reason
+        type="system",
+        subtype="permission_denied",
+        tool_name=tool,
+        decision_reason_type=reason,
+        message=f"Permission to use {tool} has been denied.",
     )
 
 
