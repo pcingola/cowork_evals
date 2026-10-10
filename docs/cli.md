@@ -35,6 +35,7 @@ cowork_evals --version
   runs. There is no sweep verb.
 - Options are named. Nothing is forwarded raw to `claude plugin eval`. `test` is the one verb
   with a raw tail, and the tail goes to pytest.
+- `--version` prints the installed `cowork-evals` version and exits 0.
 
 ## The path is the scope
 
