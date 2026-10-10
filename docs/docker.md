@@ -40,6 +40,7 @@ The `docker:` section of `cowork_evals.yaml`. The file, and the ladder over it, 
 | ---------------------- | ------------------------------ | ------------------------------------------------------ |
 | `platform`             | `linux/arm64`                  | The build and run platform. In the image digest        |
 | `claude_code_version`  | `2.1.265`                      | The npm version of the CLI installed. In the digest    |
+| `credential`           | `login`                        | How Claude Code authenticates: `login` mounts the login this package owns, `bedrock` forwards the four Bedrock names from the host |
 | `login_dir`            | `~/.cache/cowork_evals/claude` | Where the login this package owns is kept              |
 | `extra_ca_file`        | none                           | An extra root CA for a host whose network inspects TLS |
 | `env_passthrough`      | empty                          | Host variable names forwarded into the run container   |
@@ -454,10 +455,10 @@ docker:
 Two conditions, both in `Docker.check`, so `check --docker` reports them and `run` exits 3 on
 them before anything is created:
 
-| Condition                                                                                    | Because                                                                                                                          |
-| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| A named variable is unset or empty on the host                                               | A missing precondition fails. An empty string is not a value, and a run that forwarded one would look configured and would not be |
-| A named variable is `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` | The container login above is the one route for Claude's own credential, whatever the variable holds                               |
+| Condition                                                                                                                                                                                                 | Because                                                                                                                          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| A named variable is unset or empty on the host                                                                                                                                                            | A missing precondition fails. An empty string is not a value, and a run that forwarded one would look configured and would not be |
+| A named variable is `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`, `AWS_BEARER_TOKEN_BEDROCK`, `ANTHROPIC_BEDROCK_BASE_URL` or `AWS_REGION` | `docker.credential` is the one route for Claude's own credential, whatever the variable holds                                    |
 
 Each line names the variable and never its value. A value is read once, where the preflight
 reads it, and is not read a second time at container start.

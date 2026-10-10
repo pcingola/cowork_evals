@@ -150,7 +150,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 - [x] [`tests/unit/test_judge.py`](plan_tests/unit_test_judge.md), with the `judge.truncate` fix. Docs: `docs/cowork_backend.md` "The judge" (`--json-schema`, `structured_output`, the reasoning in `explanation`).
 - [x] [`tests/unit/test_harness.py`](plan_tests/unit_test_harness.md)
 - [x] [`tests/unit/test_config.py`](plan_tests/unit_test_config.md). Docs: `docs/docker.md` "The three lists" (the variable-name shape refusal).
-- [ ] [`tests/unit/test_docker.py`](plan_tests/unit_test_docker.md). Docs: `docs/docker.md` "Environment passthrough" (the Bedrock names in the conditions table).
+- [x] [`tests/unit/test_docker.py`](plan_tests/unit_test_docker.md). Docs: `docs/docker.md` "Environment passthrough" (the Bedrock names in the conditions table).
 - [ ] [`tests/unit/test_parity.py`](plan_tests/unit_test_parity.md)
 - [ ] [`tests/unit/test_pytest_image.py`](plan_tests/unit_test_pytest_image.md)
 - [ ] [`tests/integration/test_pytest_image.py`](plan_tests/integration_test_pytest_image.md)
