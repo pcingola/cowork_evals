@@ -1,4 +1,4 @@
-"""The delta table in docs/docker.md, one test per row.
+"""The delta table in docs/docker.md, one case per row.
 
 Every input is a recorded probe document under tests/data/docker/. `probe_clean.json` is
 a real probe of the built image; each other document is that one with a single delta
@@ -8,6 +8,8 @@ introduced. No container starts here, and the comparison is the real one.
 from __future__ import annotations
 
 from pathlib import Path
+
+import pytest
 
 from cowork_evals.docker import probe
 from cowork_evals.docker.parity import (
@@ -30,81 +32,52 @@ def probed(name: str) -> tuple[list[str], list[str]]:
 
 
 def test_a_clean_probe_has_no_failures():
-    failures, _ = probed("probe_clean")
+    """The font family count is printed and does not fail. ImageMagick's build suffix in its
+    line is no version difference, so the clean probe carries no other note."""
+    assert probed("probe_clean") == ([], ["font families: 114, expected 118"])
+
+
+@pytest.mark.parametrize(
+    ("name", "failure"),
+    [
+        ("probe_pin_missing", "pin missing: pypdf==6.18.0"),
+        ("probe_pin_moved", "pin moved: pandas==2.0.0, expected 2.3.3"),
+        ("probe_npm_missing", "npm package missing: pptxgenjs@4.0.1"),
+        ("probe_npm_moved", "npm package moved: docx@9.6.0, expected 9.7.1"),
+        (
+            "probe_node_path_unset",
+            "NODE_PATH: None, expected /usr/local/lib/node_modules_global/lib/node_modules",
+        ),
+        ("probe_absent_tool_present", "tool recorded as absent is present: exiftool"),
+        ("probe_uno_fails", "import uno failed: ModuleNotFoundError: No module named 'uno'"),
+    ],
+)
+def test_a_failing_delta_is_the_one_failure(name: str, failure: str):
+    failures, _ = probed(name)
+    assert failures == [failure]
+
+
+@pytest.mark.parametrize(
+    ("name", "note"),
+    [
+        ("probe_extra_package", "extra package: rich==14.0.0"),
+        ("probe_tool_version_differs", "tool version differs: pandoc 2.9.2.2, expected 2.9.2.1"),
+        ("probe_npm_extra", "extra npm package: left-pad@1.3.0"),
+        ("probe_sandbox_tool_absent", "tool absent: bwrap, no version recorded"),
+        ("probe_tool_absent", "tool absent: pandoc, expected 2.9.2.1"),
+    ],
+)
+def test_a_printed_delta_is_a_note_and_no_failure(name: str, note: str):
+    failures, notes = probed(name)
     assert failures == []
+    assert note in notes
 
 
-def test_a_missing_pin_fails():
-    failures, _ = probed("probe_pin_missing")
-    assert failures == ["pin missing: pypdf==6.18.0"]
-
-
-def test_a_moved_pin_fails():
-    failures, _ = probed("probe_pin_moved")
-    assert failures == ["pin moved: pandas==2.0.0, expected 2.3.3"]
-
-
-def test_an_extra_package_is_printed_and_does_not_fail():
-    failures, notes = probed("probe_extra_package")
-    assert failures == []
-    assert "extra package: rich==14.0.0" in notes
-
-
-def test_a_differing_tool_version_is_printed_and_does_not_fail():
-    failures, notes = probed("probe_tool_version_differs")
-    assert failures == []
-    assert "tool version differs: pandoc 2.9.2.2, expected 2.9.2.1" in notes
-
-
-def test_a_missing_npm_package_fails():
-    failures, _ = probed("probe_npm_missing")
-    assert failures == ["npm package missing: pptxgenjs@4.0.1"]
-
-
-def test_a_moved_npm_package_fails():
-    failures, _ = probed("probe_npm_moved")
-    assert failures == ["npm package moved: docx@9.6.0, expected 9.7.1"]
-
-
-def test_an_extra_npm_package_is_printed_and_does_not_fail():
-    failures, notes = probed("probe_npm_extra")
-    assert failures == []
-    assert "extra npm package: left-pad@1.3.0" in notes
-
-
-def test_a_node_path_that_does_not_name_the_tree_fails():
-    failures, _ = probed("probe_node_path_unset")
-    assert failures == [
-        "NODE_PATH: None, expected /usr/local/lib/node_modules_global/lib/node_modules"
-    ]
-
-
-def test_a_tool_recorded_as_absent_being_present_fails():
-    failures, _ = probed("probe_absent_tool_present")
-    assert failures == ["tool recorded as absent is present: exiftool"]
-
-
-def test_every_tool_the_probe_probes_is_in_one_of_the_three_tables():
+def test_every_tool_the_probe_probes_is_in_exactly_one_of_the_three_tables():
     """The row compare() fails on. It is over the package's own tables, not over a document."""
-    assert set(probe.VERSION_COMMANDS) == set(EXPECTED_VERSIONS) | set(ABSENT) | set(PRESENT)
-
-
-def test_a_tool_with_no_recorded_version_is_printed_when_it_is_absent():
-    """bwrap, socat and ssh have no version in the tables. compare() still reads them."""
-    failures, notes = probed("probe_sandbox_tool_absent")
-    assert failures == []
-    assert "tool absent: bwrap, no version recorded" in notes
-
-
-def test_import_uno_failing_fails():
-    failures, _ = probed("probe_uno_fails")
-    assert failures == ["import uno failed: ModuleNotFoundError: No module named 'uno'"]
-
-
-def test_a_build_suffix_in_the_tool_line_is_not_a_difference():
-    """ImageMagick reports 6.9.11-60 in its line and 6.9.11 as the parsed version."""
-    _, notes = probed("probe_clean")
-    assert not [note for note in notes if note.startswith("tool version differs: convert")]
+    versions, absent, present = set(EXPECTED_VERSIONS), set(ABSENT), set(PRESENT)
+    assert set(probe.VERSION_COMMANDS) == versions | absent | present
+    assert not (versions & absent or versions & present or absent & present)
 
 
 def test_the_platform_the_probe_ran_on_is_reported(capsys):

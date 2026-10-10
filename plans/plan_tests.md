@@ -151,7 +151,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 - [x] [`tests/unit/test_harness.py`](plan_tests/unit_test_harness.md)
 - [x] [`tests/unit/test_config.py`](plan_tests/unit_test_config.md). Docs: `docs/docker.md` "The three lists" (the variable-name shape refusal).
 - [x] [`tests/unit/test_docker.py`](plan_tests/unit_test_docker.md). Docs: `docs/docker.md` "Environment passthrough" (the Bedrock names in the conditions table).
-- [ ] [`tests/unit/test_parity.py`](plan_tests/unit_test_parity.md)
+- [x] [`tests/unit/test_parity.py`](plan_tests/unit_test_parity.md)
 - [ ] [`tests/unit/test_pytest_image.py`](plan_tests/unit_test_pytest_image.md)
 - [ ] [`tests/integration/test_pytest_image.py`](plan_tests/integration_test_pytest_image.md)
 - [ ] [`tests/unit/test_preflight.py`](plan_tests/unit_test_preflight.md), with `preflight.checks_all` deleted.
