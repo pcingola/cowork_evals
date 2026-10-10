@@ -164,7 +164,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 - [x] [`tests/unit/test_cli_docs_init.py`](plan_tests/unit_test_cli_docs_init.md) and [`tests/unit/test_cli.py`](plan_tests/unit_test_cli.md) in one commit, which merges the first file into the second. Docs: `docs/cli.md` "Synopsis" (`--version`).
 - [x] [`tests/integration/test_cowork.py`](plan_tests/integration_test_cowork.md)
 - [x] [`tests/integration/test_cowork_backend.py`](plan_tests/integration_test_cowork_backend.md)
-- [ ] [`tests/integration/test_judge.py`](plan_tests/integration_test_judge.md)
+- [x] [`tests/integration/test_judge.py`](plan_tests/integration_test_judge.md)
 - [ ] [`tests/integration/test_cli.py`](plan_tests/integration_test_cli.md)
 - [ ] [`tests/integration/test_docker.py`](plan_tests/integration_test_docker.md). Docs: `docs/docker.md` "The mechanism" step 5 (a line that is not a shell name is skipped) and "The Bash sandbox" (the `--proc` mount and the `/run/shm` tmpfs).
 - [ ] Delete every fixture under `tests/data/` that `data.md` lists for deletion, and every other file there that no test reads. `grep` for each path under `tests/` returns nothing before it is deleted.
