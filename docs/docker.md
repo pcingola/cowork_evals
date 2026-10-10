@@ -369,8 +369,17 @@ one command per package the rule added, and `parity.py` records its version.
 
 ## Credentials
 
-One route: a login this package owns, mounted. There is no API key route, by the developer's
-decision. A host with no interactive terminal logs in on a host that has one and carries the two
+`docker.credential` selects one of two routes. There is no API key route, by the developer's
+decision.
+
+| Route            | What reaches the container                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `login`, default | A login this package owns, mounted                                                                              |
+| `bedrock`        | `CLAUDE_CODE_USE_BEDROCK`, `AWS_BEARER_TOKEN_BEDROCK`, `ANTHROPIC_BEDROCK_BASE_URL` and `AWS_REGION`, each as `--env`, from the host |
+
+Under `bedrock` a name that is unset or empty on the host fails the preflight with the
+`BEDROCK` condition, and nothing is mounted for a login. The rest of this section is the `login`
+route. A host with no interactive terminal logs in on a host that has one and carries the two
 paths below.
 
 | Host path, under `docker.login_dir` | Holds                                                      |
