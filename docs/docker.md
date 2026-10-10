@@ -521,7 +521,9 @@ symlink gets no `TZ`.
 
 ### The three lists
 
-A name belongs in exactly one list, by this rule. A name in two lists is refused at load.
+A name belongs in exactly one list, by this rule. A name in two lists is refused at load. A
+name that does not match `[A-Za-z_][A-Za-z0-9_]*` is refused at load, and the message names
+the key that holds it.
 
 | Key               | A name goes here when                                               | Default                                  |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------------------- |
