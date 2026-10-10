@@ -34,3 +34,13 @@ Assessment for [`../plan_tests.md`](../plan_tests.md). Model names refer to [`..
 | `test_every_document_the_readme_names_exists` | OK | `README.md` "Documentation" | Keep. |
 
 Every `test_cli.py::` name above is a test that moves there from `test_cli_docs_init.py` with the file merge in the "Decisions" table. Keep the file. Lines: 312 test vs 167 unit (`resources.py`); much of it checks repository files (docs, skills) rather than `resources.py`. Phase 4's line check applies to it as to every file.
+
+## Line count
+
+After phase 4 the file is 236 lines against 167 for `resources.py`. These rows bring it under.
+
+| Test | Verdict | Requirement | What to do |
+| ---- | ------- | ----------- | ---------- |
+| `test_every_shipped_skill_is_a_directory_named_for_it`, `test_no_skill_file_sends_the_reader_to_the_documentation`, `test_every_reference_a_skill_names_is_there`, `test_every_reference_a_skill_holds_is_named_by_its_skill_file`, `test_a_reference_that_shares_a_document_name_is_a_link_to_it`, `test_every_link_in_a_reference_stays_inside_its_skill`, `REFERENCE` | FIX | `docs/library.md` "The skills" | One test, `test_every_shipped_skill_holds_to_the_skill_rules`, that walks `resources.skills()` once and collects one offender list per rule: name differs from directory, sends to `docs/`, names a missing reference, holds an unnamed reference, holds a copy of a document, links outside `references/`. It asserts the skill list is not empty and every offender list is empty, compared as one dict of rule name to list so a failure names the rule. |
+| module docstring, test docstrings | FIX | none | Cut the module docstring to its first paragraph's two facts (the tests run in the checkout layout; R1 and R2 are checked over the repository's own files). Cut each test docstring to one line, or drop it where the name says it. |
+| `NOT_A_DEFAULT`, `_uncommented` | FIX | `docs/library.md` "The four sections" | One regular expression substitution over the text in place of the line loop, with the two non-default keys excluded by a negative lookahead. Behaviour unchanged. |
