@@ -144,7 +144,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 - [x] [`tests/unit/test_results.py`](plan_tests/unit_test_results.md)
 - [x] [`tests/unit/test_validate.py`](plan_tests/unit_test_validate.md), with the `_check_violations` change and the `duplicate-checks` case the "Decisions" table names.
 - [x] [`tests/unit/test_checks.py`](plan_tests/unit_test_checks.md). Docs: `docs/checks.md` "The Run object" (a missing `last_message.txt` reads as `""`), a new advisory section in `docs/checks.md`, and `docs/checks_layer.md` "What reaches the result document" (a missing or unparseable document gives no warning and is left unchanged).
-- [ ] [`tests/unit/test_cowork.py`](plan_tests/unit_test_cowork.md)
+- [x] [`tests/unit/test_cowork.py`](plan_tests/unit_test_cowork.md)
 - [ ] [`tests/unit/test_cowork_backend.py`](plan_tests/unit_test_cowork_backend.md)
 - [ ] [`tests/unit/test_grader.py`](plan_tests/unit_test_grader.md)
 - [ ] [`tests/unit/test_judge.py`](plan_tests/unit_test_judge.md), with the `judge.truncate` fix. Docs: `docs/cowork_backend.md` "The judge" (`--json-schema`, `structured_output`, the reasoning in `explanation`).
