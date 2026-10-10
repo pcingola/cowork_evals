@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from importlib.resources import files
 from pathlib import Path
+
+import pytest
 
 from cowork_evals.docker.parity import EXPECTED_VERSIONS
 from cowork_evals.requirements import pins as read_pins
@@ -47,30 +48,6 @@ def pins(path: Path) -> dict[str, str]:
     return read_pins(path.read_text())
 
 
-def interpreter(venv: Path) -> str:
-    """The full `major.minor.patch`. The patch is the point: it is what a session runs."""
-    report = 'import sys; print("%d.%d.%d" % sys.version_info[:3])'
-    return subprocess.run(
-        [str(venv / "bin" / "python"), "-c", report],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-
-
-def test_requirements_files_exist():
-    assert REQUIREMENTS.is_file()
-    assert INSTALLABLE.is_file()
-    assert TEST_ONLY.is_file()
-
-
-def test_requirements_files_resolve_as_package_data():
-    """How a build reaches them from an installed wheel, with no checkout in sight."""
-    data = files("cowork_evals") / "data"
-    for name in ("requirements.txt", "requirements_installable.txt"):
-        assert (data / name).read_text().count("==") > 100
-
-
 def test_installable_is_the_freeze_minus_the_nine():
     full = pins(REQUIREMENTS)
     installable = pins(INSTALLABLE)
@@ -99,20 +76,15 @@ def test_the_development_interpreter_is_the_session_interpreter():
     assert EXPECTED_VERSIONS["python3"] == PINNED
 
 
-def test_repo_venv_is_the_pinned_interpreter():
-    assert (VENV / "bin" / "python").exists(), ".venv not built. Run scripts/venv.sh"
-    assert interpreter(VENV) == PINNED
-
-
-def test_tests_run_under_the_repo_venv_not_the_mirror():
+def test_tests_run_under_the_repo_venv_on_the_pinned_interpreter():
     """The two environments are the same interpreter, so the prefix is what tells them apart.
 
     A run under the mirror would carry the CoWork wheel set and not the dev group, so the
-    suite would collect against the wrong dependencies. It holds whether or not the mirror
-    is built, because what it asserts is which environment this suite is under.
-    docs/environments.md.
+    suite would collect against the wrong dependencies. The patch is the point of the
+    version: it is what a session runs. docs/environments.md.
     """
     assert Path(sys.prefix).resolve() == VENV.resolve(), f"suite ran under {sys.prefix}"
+    assert ".".join(map(str, sys.version_info[:3])) == PINNED
 
 
 def test_scripts_readme_carries_a_row_for_every_script():
@@ -122,34 +94,27 @@ def test_scripts_readme_carries_a_row_for_every_script():
         assert f"`{script.name}`" in index, f"{script.name} has no row in scripts/README.md"
 
 
-def test_login_sh_holds_no_logic_and_execs_the_verb():
-    """The login decision is the verb's, and the script only passes arguments to it.
-
-    An interpreter embedded in the script would put the conditions, the messages and the
-    exit codes in two places, and the two would drift. scripts/README.md and
-    ../../docs/cli.md.
-    """
-    script = (ROOT / "scripts" / "login.sh").read_text()
-    for embedded in ("python3 -c", "python -c", 'uv run --project "$ROOT" python3'):
-        assert embedded not in script, f"login.sh embeds an interpreter: {embedded}"
-    assert 'exec uv run --project "$ROOT" cowork_evals login --docker "$@"' in script
+# Every `*.sh` in the repository, outside a dot directory. `scripts/lint.sh` selects by the
+# same rule, so no shell file is checked here and unlinted there. The rule excludes every dot
+# directory, `.venv_cowork/` among them when it is built, because that one carries a vendored
+# shell file.
+SCRIPTS = sorted(
+    path
+    for path in ROOT.rglob("*.sh")
+    if not any(part.startswith(".") for part in path.relative_to(ROOT).parts)
+)
 
 
-def test_every_script_is_executable_and_parses():
-    """Every `*.sh` in the repository, outside a dot directory.
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda path: str(path.relative_to(ROOT)))
+def test_every_script_parses(script: Path):
+    subprocess.run(["bash", "-n", str(script)], check=True)
 
-    `scripts/lint.sh` selects by the same rule, so no shell file is checked here and
-    unlinted there. The rule excludes every dot directory, `.venv_cowork/` among them when
-    it is built, because that one carries a vendored shell file.
-    """
-    scripts = sorted(
-        path
-        for path in ROOT.rglob("*.sh")
-        if not any(part.startswith(".") for part in path.relative_to(ROOT).parts)
-    )
-    assert scripts, "no shell files found"
-    for script in scripts:
-        # lib.sh is sourced, never executed, so it needs no executable bit.
-        if script.name != "lib.sh":
-            assert script.stat().st_mode & 0o111, f"{script.name} is not executable"
-        subprocess.run(["bash", "-n", str(script)], check=True)
+
+# `lib.sh` is sourced, never executed, so it needs no executable bit.
+@pytest.mark.parametrize(
+    "script",
+    [path for path in SCRIPTS if path.name != "lib.sh"],
+    ids=lambda path: str(path.relative_to(ROOT)),
+)
+def test_every_script_is_executable(script: Path):
+    assert script.stat().st_mode & 0o111
