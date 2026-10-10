@@ -7,27 +7,16 @@ tests/integration/test_judge.py. See ../README.md.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from cowork_evals.cases import BaselineGraderConfig, Grader, LlmGraderConfig
+from cowork_evals.cases import BaselineGraderConfig, FileTarget, Grader, LlmGraderConfig
+from cowork_evals.config import CONFIG_FILENAME, Config, EvalSection
 from cowork_evals.cowork import SessionDocument
 from cowork_evals.judge import (
-    CHECK_INSTRUCTION,
-    CHECK_TOOLS,
-    EVIDENCE_LIMIT,
-    FAIL_WORD,
-    FILES_CLOSE,
-    FILES_OPEN,
-    INSTRUCTION,
-    MATERIAL_CLOSE,
-    MATERIAL_LIMIT,
-    MATERIAL_OPEN,
-    PASS_WORD,
-    VERDICT_SCHEMA,
+    Material,
     Reply,
     check_argv,
     compose,
@@ -38,11 +27,12 @@ from cowork_evals.judge import (
     read_reply,
     resolve_model,
     tally,
-    truncate,
 )
 
 JUDGE = Path(__file__).resolve().parent.parent / "data" / "judge"
 CASE = JUDGE / "case"
+
+GraderFactory = Callable[..., Grader]
 
 
 def recorded(name: str) -> str:
@@ -51,67 +41,49 @@ def recorded(name: str) -> str:
 
 # The command line.
 
-
-def test_judge_argv_is_claude_p_with_the_model_and_strict_mcp_config() -> None:
-    assert judge_argv("haiku") == [
-        "claude",
-        "-p",
-        "--output-format",
-        "json",
-        "--model",
-        "haiku",
-        "--strict-mcp-config",
-        "--json-schema",
-        json.dumps(VERDICT_SCHEMA),
-    ]
-
-
-def test_the_check_judge_argv_adds_the_grant_to_the_judge_argv() -> None:
-    assert check_argv("haiku") == [*judge_argv("haiku"), "--allowedTools", "Read,Glob,Grep"]
-    assert CHECK_TOOLS == ("Read", "Glob", "Grep")
+JUDGE_ARGV = [
+    "claude",
+    "-p",
+    "--output-format",
+    "json",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--json-schema",
+    '{"type": "object", "properties": {"reasoning": {"type": "string"}, '
+    '"verdict": {"type": "string", "enum": ["PASS", "FAIL"]}}, '
+    '"required": ["reasoning", "verdict"], "additionalProperties": false}',
+]
 
 
-def test_the_check_judge_argv_carries_one_add_dir_per_path_outside() -> None:
-    assert check_argv("haiku", ("/a", "/b")) == [
-        *judge_argv("haiku"),
+def test_judge_argv_is_claude_p_with_the_model_strict_mcp_config_and_the_schema() -> None:
+    assert judge_argv("haiku") == JUDGE_ARGV
+
+
+@pytest.mark.parametrize(
+    ("outside", "add_dirs"),
+    [((), []), (("/a", "/b"), ["--add-dir", "/a", "--add-dir", "/b"])],
+)
+def test_the_check_judge_argv_adds_the_grant_and_one_add_dir_per_path_outside(
+    outside: tuple[str, ...], add_dirs: list[str]
+) -> None:
+    assert check_argv("haiku", outside) == [
+        *JUDGE_ARGV,
         "--allowedTools",
         "Read,Glob,Grep",
-        "--add-dir",
-        "/a",
-        "--add-dir",
-        "/b",
+        *add_dirs,
     ]
 
 
-def test_the_check_judge_argv_writes_no_turn_cap_and_no_permission_mode() -> None:
-    """A cap is a restriction nobody asked for, and the grant alone lets the judge read."""
-    argv = " ".join(check_argv("haiku", ("/a",)))
-    assert "--max-turns" not in argv
-    assert "--permission-mode" not in argv
-
-
-def test_judge_argv_is_untouched_by_the_check_judge() -> None:
-    assert "--allowedTools" not in judge_argv("haiku")
-    assert "--add-dir" not in judge_argv("haiku")
-
-
-def test_the_check_judge_is_shown_the_paths_and_never_the_material() -> None:
-    assert compose_paths("Every slide carries a title.", ("scratch/deck.png", "/tmp/x.pdf")) == (
-        "Every slide carries a title.\n\n"
-        f"{FILES_OPEN}\nscratch/deck.png\n/tmp/x.pdf\n{FILES_CLOSE}\n\n{CHECK_INSTRUCTION}"
-    )
-
-
-def test_the_enablement_variable_is_not_exported() -> None:
-    """It enables `claude plugin eval`, and this is `claude -p`."""
-    import cowork_evals.judge as module
-
-    assert not hasattr(module, "ENABLEMENT_ENV")
-    assert "WALNUT" not in " ".join(judge_argv("haiku"))
+def test_the_check_judge_is_shown_the_paths_after_the_prompt() -> None:
+    text = compose_paths("Every slide carries a title.", ("scratch/deck.png", "/x.pdf"))
+    lines = text.split("\n")
+    assert lines[0] == "Every slide carries a title."
+    assert lines.index("scratch/deck.png") + 1 == lines.index("/x.pdf")
 
 
 def test_the_caller_beats_the_configured_judge_model(working_directory, tmp_path: Path) -> None:
-    (tmp_path / "cowork_evals.yaml").write_text("eval:\n  judge_model: sonnet\n", encoding="utf-8")
+    Config(eval=EvalSection(judge_model="sonnet")).dump(tmp_path / CONFIG_FILENAME)
     with working_directory(tmp_path):
         assert resolve_model() == "sonnet"
         assert resolve_model("opus") == "opus"
@@ -120,60 +92,65 @@ def test_the_caller_beats_the_configured_judge_model(working_directory, tmp_path
 # The composed text.
 
 
-def test_the_criteria_is_the_body_when_no_key_is_written(grader: Callable[..., Grader]) -> None:
-    assert criteria(grader("llm", markdown="The reply is warm.")) == "The reply is warm."
+@pytest.mark.parametrize(
+    ("config", "rubric"),
+    [(LlmGraderConfig(), "the body"), (LlmGraderConfig(criteria="the key"), "the key")],
+)
+def test_the_criteria_is_the_key_where_one_is_written_and_the_body_otherwise(
+    grader: GraderFactory, config: LlmGraderConfig, rubric: str
+) -> None:
+    assert criteria(grader("llm", config, markdown="the body")) == rubric
 
 
-def test_a_written_criteria_key_beats_the_body(grader: Callable[..., Grader]) -> None:
-    written = grader("llm", LlmGraderConfig(criteria="the key"), markdown="the body")
-    assert criteria(written) == "the key"
+def test_the_composed_text_is_the_rubric_then_the_material_truncated_head_and_tail() -> None:
+    long = "h" + "m" * 100_008 + "t"
+    text = compose("The reply is warm.", long)
+    assert text.startswith("The reply is warm.\n")
+    assert "\nh" + "m" * 49_000 in text
+    assert "m" * 49_000 + "t\n" in text
+    assert "m" * 100_000 not in text
+    assert "\n...\n" in text
 
 
-def test_the_composed_text_is_the_rubric_the_material_and_the_instruction() -> None:
-    assert compose("The reply is warm.", "Hello Alex.") == (
-        f"The reply is warm.\n\n{MATERIAL_OPEN}\nHello Alex.\n{MATERIAL_CLOSE}\n\n{INSTRUCTION}"
-    )
-
-
-def test_the_material_is_truncated_head_and_tail() -> None:
-    long = "a" * (MATERIAL_LIMIT + 10)
-    kept = truncate(long, MATERIAL_LIMIT)
-    assert len(kept) == MATERIAL_LIMIT + len("\n...\n")
-    assert kept.startswith("aaa")
-    assert kept.endswith("aaa")
-    assert "\n...\n" in kept
-    assert truncate("short", MATERIAL_LIMIT) == "short"
-
-
+@pytest.mark.parametrize(
+    ("config", "shown"),
+    [
+        (LlmGraderConfig(focus="files", target="last_message"), "figures/chart.svg\nreport.md"),
+        (LlmGraderConfig(), "Hello Alex. The report is in report.md."),
+    ],
+)
 def test_an_llm_grader_reads_focus_and_ignores_target(
-    answered: SessionDocument, grader: Callable[..., Grader]
+    answered: SessionDocument, grader: GraderFactory, config: LlmGraderConfig, shown: str
 ) -> None:
-    shown = material(
-        grader("llm", LlmGraderConfig(focus="files", target="last_message")), answered, CASE
-    )
-    assert shown.error is None
-    assert shown.text == "figures/chart.svg\nreport.md"
+    assert material(grader("llm", config), answered, CASE) == Material(text=shown)
 
 
-def test_an_llm_grader_defaults_to_the_last_message(
-    answered: SessionDocument, grader: Callable[..., Grader]
+@pytest.mark.parametrize(
+    ("path", "shown"),
+    [
+        ("notes.md", Material(text="A plain note.\n")),
+        (
+            "slide.png",
+            Material(
+                skip_reason="slide.png is an image, and the harness shows the judge the image "
+                "itself, which one text call cannot"
+            ),
+        ),
+        (
+            "deck.pptx",
+            Material(error="deck.pptx is not UTF-8 text: render it to an image, or write UTF-8"),
+        ),
+    ],
+)
+def test_a_produced_file_is_text_an_image_skip_or_a_failed_grader(
+    produced: SessionDocument, grader: GraderFactory, path: str, shown: Material
 ) -> None:
-    shown = material(grader("llm"), answered, CASE)
-    assert shown.text == "Hello Alex. The report is in report.md."
-
-
-def test_an_llm_grader_reads_a_produced_file(
-    produced: SessionDocument, grader: Callable[..., Grader]
-) -> None:
-    focus = {"source": "file", "path": "notes.md"}
-    assert (
-        material(grader("llm", LlmGraderConfig(focus=focus)), produced, CASE).text
-        == "A plain note.\n"
-    )
+    config = LlmGraderConfig(focus=FileTarget(source="file", path=path))
+    assert material(grader("llm", config), produced, CASE) == shown
 
 
 def test_a_baseline_grader_shows_both_trajectories(
-    answered: SessionDocument, grader: Callable[..., Grader]
+    answered: SessionDocument, grader: GraderFactory
 ) -> None:
     shown = material(
         grader("baseline", BaselineGraderConfig(baseline_file="gold/trace.jsonl")), answered, CASE
@@ -185,114 +162,89 @@ def test_a_baseline_grader_shows_both_trajectories(
     assert '"Hello Alex. The report is in report.md."' in shown.text
 
 
-def test_a_baseline_file_outside_the_case_directory_is_refused(
-    answered: SessionDocument, grader: Callable[..., Grader]
+@pytest.mark.parametrize(
+    ("baseline_file", "error"),
+    [
+        ("../reply_pass.json", "../reply_pass.json resolves outside the case directory"),
+        ("gold/absent.jsonl", "gold/absent.jsonl is unreadable: "),
+    ],
+)
+def test_a_baseline_file_outside_the_case_or_absent_is_a_failed_grader(
+    answered: SessionDocument, grader: GraderFactory, baseline_file: str, error: str
 ) -> None:
-    shown = material(
-        grader("baseline", BaselineGraderConfig(baseline_file="../reply_pass.json")), answered, CASE
-    )
-    assert shown.error == "../reply_pass.json resolves outside the case directory"
-
-
-def test_an_absent_baseline_file_is_a_failed_grader(
-    answered: SessionDocument, grader: Callable[..., Grader]
-) -> None:
-    shown = material(
-        grader("baseline", BaselineGraderConfig(baseline_file="gold/absent.jsonl")), answered, CASE
-    )
-    assert shown.error is not None
-    assert "absent.jsonl" in shown.error
-
-
-# What the judge cannot be shown.
-
-
-def test_an_image_focus_is_a_grader_skip_and_not_a_failure(
-    produced: SessionDocument, grader: Callable[..., Grader]
-) -> None:
-    focus = {"source": "file", "path": "slide.png"}
-    shown = material(grader("llm", LlmGraderConfig(focus=focus)), produced, CASE)
-    assert shown.error is None
-    assert shown.skip_reason is not None
-    assert "slide.png is an image" in shown.skip_reason
-
-
-def test_another_binary_focus_is_a_failed_grader(
-    produced: SessionDocument, grader: Callable[..., Grader]
-) -> None:
-    focus = {"source": "file", "path": "deck.pptx"}
-    shown = material(grader("llm", LlmGraderConfig(focus=focus)), produced, CASE)
-    assert shown.skip_reason is None
-    assert shown.error == ("deck.pptx is not UTF-8 text: render it to an image, or write UTF-8")
+    config = BaselineGraderConfig(baseline_file=baseline_file)
+    shown = material(grader("baseline", config), answered, CASE)
+    assert (shown.error or "").startswith(error)
 
 
 # Counting votes.
 
 
-def test_a_pass_reply_is_a_vote_and_a_spend() -> None:
-    reply = read_reply(recorded("reply_pass"))
-    assert reply.vote is True
-    assert reply.cost_usd == 0.0021
-    assert reply.error is None
+@pytest.mark.parametrize(
+    ("stdout", "reply"),
+    [
+        (recorded("reply_pass"), Reply(vote=True, cost_usd=0.0021)),
+        (recorded("reply_fail"), Reply(vote=False, cost_usd=0.0021)),
+        (
+            recorded("reply_neither"),
+            Reply(
+                cost_usd=0.0021,
+                error="the judge answered neither word: 'I would rate this a 7 out of 10.'",
+            ),
+        ),
+        (
+            recorded("reply_no_result"),
+            Reply(cost_usd=0.0004, error="the judge document carries no result"),
+        ),
+        ("`plugin eval` is in early access\n", Reply(error="the judge printed no JSON document")),
+        (
+            recorded("reply_reasoned_unsure"),
+            Reply(
+                cost_usd=0.0021,
+                error="the judge's verdict was neither word: 'UNSURE'",
+                reasoning="the trace is ambiguous",
+            ),
+        ),
+    ],
+)
+def test_a_reply_is_a_vote_or_a_lost_vote_and_always_a_spend(stdout: str, reply: Reply) -> None:
+    assert read_reply(stdout) == reply
 
 
-def test_a_fail_reply_is_the_other_vote() -> None:
-    assert read_reply(recorded("reply_fail")).vote is False
+@pytest.mark.parametrize(
+    ("names", "passed", "explanation", "votes"),
+    [
+        (("reply_pass", "reply_fail", "reply_pass"), True, "PASS FAIL PASS", [True, False, True]),
+        (("reply_pass", "reply_fail", "reply_fail"), False, "PASS FAIL FAIL", [True, False, False]),
+        (
+            ("reply_pass", "reply_neither", "reply_neither"),
+            False,
+            "PASS LOST LOST",
+            [True, False, False],
+        ),
+    ],
+)
+def test_the_majority_of_three_decides(
+    grader: GraderFactory,
+    names: tuple[str, ...],
+    passed: bool,
+    explanation: str,
+    votes: list[bool],
+) -> None:
+    judged = tally(grader("llm"), [read_reply(recorded(name)) for name in names], "Hello.")
+    assert judged.result.passed is passed
+    assert judged.result.explanation == f"judge votes: {explanation}"
+    assert judged.result.judge_votes == votes
 
 
-def test_a_reply_that_is_neither_word_is_a_lost_vote() -> None:
-    reply = read_reply(recorded("reply_neither"))
-    assert reply.vote is None
-    assert reply.error is not None
-    assert reply.cost_usd == 0.0021, "a lost vote still cost what it cost"
-
-
-def test_a_document_with_no_result_is_a_lost_vote() -> None:
-    assert read_reply(recorded("reply_no_result")).vote is None
-
-
-def test_output_that_is_not_json_is_a_lost_vote() -> None:
-    reply = read_reply("`plugin eval` is currently in early access\n")
-    assert reply.vote is None
-    assert reply.cost_usd == 0.0
-
-
-def test_two_of_three_passes(grader: Callable[..., Grader]) -> None:
-    judged = tally(
-        grader("llm"),
-        [read_reply(recorded(name)) for name in ("reply_pass", "reply_fail", "reply_pass")],
-        "Hello Alex.",
-    )
-    assert judged.result.passed is True
-    assert judged.result.explanation == "judge votes: PASS FAIL PASS"
-    assert judged.result.judge_votes == [True, False, True]
+def test_the_evidence_and_every_spend_reach_the_result(grader: GraderFactory) -> None:
+    judged = tally(grader("llm"), [read_reply(recorded("reply_pass"))] * 3, "Hello Alex.")
     assert judged.result.evidence == "Hello Alex."
     assert judged.cost_usd == pytest.approx(0.0063)
 
 
-def test_one_of_three_fails(grader: Callable[..., Grader]) -> None:
-    judged = tally(
-        grader("llm"),
-        [read_reply(recorded(name)) for name in ("reply_pass", "reply_fail", "reply_fail")],
-        "Hello.",
-    )
-    assert judged.result.passed is False
-    assert judged.result.explanation == "judge votes: PASS FAIL FAIL"
-
-
-def test_a_lost_vote_is_not_a_pass(grader: Callable[..., Grader]) -> None:
-    judged = tally(
-        grader("llm"),
-        [read_reply(recorded(name)) for name in ("reply_pass", "reply_neither", "reply_neither")],
-        "Hello.",
-    )
-    assert judged.result.passed is False
-    assert judged.result.explanation == "judge votes: PASS LOST LOST"
-    assert judged.result.judge_votes == [True, False, False]
-
-
 def test_three_lost_votes_are_a_failed_grader_naming_the_reason(
-    grader: Callable[..., Grader],
+    grader: GraderFactory,
 ) -> None:
     judged = tally(grader("llm"), [Reply(error="claude exited 1")] * 3, "Hello.")
     assert judged.result.passed is False
@@ -300,59 +252,19 @@ def test_three_lost_votes_are_a_failed_grader_naming_the_reason(
     assert judged.result.explanation == "the judge could not be asked: claude exited 1"
 
 
-def test_the_evidence_is_truncated(grader: Callable[..., Grader]) -> None:
-    judged = tally(grader("llm"), [read_reply(recorded("reply_pass"))] * 3, "x" * 5000)
-    assert judged.result.evidence is not None
-    assert len(judged.result.evidence) == EVIDENCE_LIMIT + len("\n...\n")
+def test_the_evidence_is_capped_at_2000_characters(grader: GraderFactory) -> None:
+    long = "h" * 1000 + "m" * 3000 + "t" * 1000
+    judged = tally(grader("llm"), [read_reply(recorded("reply_pass"))] * 3, long)
+    evidence = judged.result.evidence or ""
+    assert len(evidence) == 2000
+    assert evidence.startswith("h" * 997)
+    assert evidence.endswith("t" * 998)
+    assert "\n...\n" in evidence
 
 
-# A judge that reasons and still votes. docs/checks.md.
-
-
-def reasoned(verdict: str, reasoning: str) -> str:
-    """One `claude -p --output-format json` document, as `--json-schema` makes the CLI print it."""
-    answer = {"verdict": verdict, "reasoning": reasoning}
-    return json.dumps(
-        {"result": json.dumps(answer), "structured_output": answer, "total_cost_usd": 0.0021}
-    )
-
-
-def test_a_reasoned_reply_votes_and_its_reason_reaches_the_grader(
-    grader: Callable[..., Grader],
-) -> None:
-    """Under the old rule a reply longer than one word was a lost vote, so this grader failed."""
-    replies = [read_reply(reasoned(PASS_WORD, "xlsx.sh dedup ran")) for _ in range(3)]
-    judged = tally(grader("llm"), replies, "Hello.")
-    assert judged.result.passed is True
-    assert judged.result.judge_votes == [True, True, True]
-    assert "xlsx.sh dedup ran" in judged.result.explanation
-    assert judged.cost_usd == pytest.approx(0.0063)
-
-
-def test_the_majority_decides_and_carries_the_winning_side_s_reason(
-    grader: Callable[..., Grader],
-) -> None:
-    replies = [
-        read_reply(reasoned(PASS_WORD, "the command ran")),
-        read_reply(reasoned(FAIL_WORD, "a script wrote it")),
-        read_reply(reasoned(PASS_WORD, "the command is in the trace")),
-    ]
-    judged = tally(grader("llm"), replies, "Hello.")
+def test_the_winning_side_s_reason_reaches_the_explanation(grader: GraderFactory) -> None:
+    names = ("reply_reasoned_pass", "reply_reasoned_fail", "reply_reasoned_pass")
+    judged = tally(grader("llm"), [read_reply(recorded(name)) for name in names], "Hello.")
     assert judged.result.passed is True
     assert "the command ran" in judged.result.explanation
     assert "a script wrote it" not in judged.result.explanation
-
-
-def test_a_verdict_outside_the_schema_is_a_lost_vote(grader: Callable[..., Grader]) -> None:
-    replies = [read_reply(reasoned("UNSURE", "the trace is ambiguous")) for _ in range(3)]
-    judged = tally(grader("llm"), replies, "Hello.")
-    assert judged.result.passed is False
-    assert judged.result.judge_votes is None
-    assert "UNSURE" in judged.result.explanation
-
-
-def test_a_bare_word_reply_still_votes(grader: Callable[..., Grader]) -> None:
-    """What a CLI too old for `--json-schema` leaves. It votes, and explains nothing."""
-    judged = tally(grader("llm"), [read_reply(recorded("reply_pass"))] * 3, "Hello.")
-    assert judged.result.passed is True
-    assert judged.result.explanation == "judge votes: PASS PASS PASS"

@@ -244,12 +244,15 @@ def compose(rubric: str, material: str) -> str:
 
 
 def truncate(text: str, limit: int) -> str:
-    """Head and tail kept, the middle elided. That is what the harness shows a judge."""
+    """Head and tail kept, the middle elided. That is what the harness shows a judge.
+
+    The result, elision included, is at most `limit` characters.
+    """
     if len(text) <= limit:
         return text
-    head = limit // 2
-    tail = limit - head
-    return text[:head] + ELISION + text[-tail:]
+    kept = limit - len(ELISION)
+    head = kept // 2
+    return text[:head] + ELISION + text[len(text) - (kept - head) :]
 
 
 def material(grader: Grader, document: SessionDocument, case_dir: Path) -> Material:
