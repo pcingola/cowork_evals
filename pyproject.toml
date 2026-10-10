@@ -19,7 +19,7 @@ classifiers = [
   "Topic :: Software Development :: Testing",
 ]
 requires-python = ">=3.10"
-dependencies = ["PyYAML>=6", "packaging>=24", "python-frontmatter>=1.1"]
+dependencies = ["PyYAML>=6", "packaging>=24", "pydantic>=2.7", "python-frontmatter>=1.1"]
 
 [project.urls]
 Homepage = "https://github.com/pcingola/cowork_evals"

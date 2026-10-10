@@ -32,17 +32,17 @@ not a failed run. Nothing here prints, and nothing here decides pass or fail.
 
 from __future__ import annotations
 
-import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from . import logs, results
 from .cowork import OUTPUTS as SESSION_OUTPUTS
-from .cowork import final_text
+from .cowork import Message, final_text
 from .harness import RESULT_NAME
-from .results import ARM_WITH, ARMS
+from .results import ARM_WITH, ARM_WITHOUT, ResultDocument, RunEntry
 
 # The harness's `TMPDIR` inside the log directory, and so the parent of every kept sandbox.
 # Short, because a socket path inside it is bounded. It is removed once collection is done,
@@ -64,13 +64,6 @@ TRACE_NAME = "trace.jsonl"
 LAST_MESSAGE_NAME = "last_message.txt"
 WORKSPACE_NAME = "workspace"
 
-
-# The result document field that says a run came from the CoWork backend. It is this
-# repository's own added field, and the harness writes no such key.
-# docs/cowork_backend.md.
-COWORK = "cowork"
-SESSION_DIR = "sessionDir"
-
 # The two fields the checks below add to a run's entry, read by [verdict.py](verdict.py).
 # They are this repository's own, like `cowork` above, and the contract is additive-only.
 # docs/running_evals.md.
@@ -88,6 +81,25 @@ PERMISSION_DENIED = "permission_denied"
 # A denial from the plugin's own hook carries another reason and is the plugin's behaviour,
 # which a case testing a hook is asserting over. docs/running_evals.md.
 MODE = "mode"
+
+
+class TraceRecord(BaseModel):
+    """One line of a harness `trace.jsonl`, as far as this module reads it.
+
+    The stream carries keys nothing here reads, such as `session_id` and `uuid`, and they are
+    ignored. `message` is the API message on a conversation record and a plain string on a
+    `permission_denied` record.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    type: str
+    subtype: str | None = None
+    message: Message | str | None = None
+    result: str | None = None
+    tools: list[str] | None = None
+    tool_name: str | None = None
+    decision_reason_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,7 +209,7 @@ def last_message(trace: Path | str) -> str | None:
     return _final(_records(trace))
 
 
-def denied_tools(records: list[dict[str, Any]]) -> list[str]:
+def denied_tools(records: list[TraceRecord]) -> list[str]:
     """Check one: every tool the permission mode refused this run, in the order refused.
 
     A `permission_denied` record carries the tool and why it was refused. Only `mode` is read.
@@ -209,17 +221,17 @@ def denied_tools(records: list[dict[str, Any]]) -> list[str]:
     """
     found: list[str] = []
     for record in records:
-        if record.get("type") != SYSTEM or record.get("subtype") != PERMISSION_DENIED:
+        if record.type != SYSTEM or record.subtype != PERMISSION_DENIED:
             continue
-        if record.get("decision_reason_type") != MODE:
+        if record.decision_reason_type != MODE:
             continue
-        tool = record.get("tool_name")
-        if isinstance(tool, str) and tool and tool not in found:
+        tool = record.tool_name
+        if tool and tool not in found:
             found.append(tool)
     return found
 
 
-def unoffered_tools(records: list[dict[str, Any]], granted: tuple[str, ...]) -> list[str]:
+def unoffered_tools(records: list[TraceRecord], granted: tuple[str, ...]) -> list[str]:
     """Check two: every granted tool the run never offered the model, in the grant's order.
 
     The `init` record lists what the run offered. A trace with no such record says nothing
@@ -242,27 +254,24 @@ def unoffered_tools(records: list[dict[str, Any]], granted: tuple[str, ...]) -> 
     return missing
 
 
-def _note_validity(
-    run: dict[str, Any], records: list[dict[str, Any]], granted: tuple[str, ...]
-) -> None:
+def _note_validity(run: RunEntry, records: list[TraceRecord], granted: tuple[str, ...]) -> None:
     """Write what the two checks found into this run's entry, and nothing when they found
     nothing, so a healthy document is unchanged."""
     denied = denied_tools(records)
     if denied:
-        run[DENIED] = denied
+        run.denied_tools = denied
     unoffered = unoffered_tools(records, granted)
     if unoffered:
-        run[UNOFFERED] = unoffered
+        run.unoffered_tools = unoffered
 
 
-def _offered(records: list[dict[str, Any]]) -> set[str] | None:
+def _offered(records: list[TraceRecord]) -> set[str] | None:
     """The tool names the `init` record listed, or `None` when the run wrote no list."""
     for record in records:
-        if record.get("type") != SYSTEM or record.get("subtype") != INIT:
+        if record.type != SYSTEM or record.subtype != INIT:
             continue
-        tools = record.get("tools")
-        if isinstance(tools, list):
-            return {_bare(tool) for tool in tools if isinstance(tool, str)}
+        if record.tools is not None:
+            return {_bare(tool) for tool in record.tools}
     return None
 
 
@@ -275,7 +284,7 @@ def _bare(name: str) -> str:
 
 
 def _each_run(
-    output_dir: Path, root: Path, document: dict[str, Any], granted: tuple[str, ...]
+    output_dir: Path, root: Path, document: ResultDocument, granted: tuple[str, ...]
 ) -> list[str]:
     """Every run of every arm of every case, in the order the document lists them.
 
@@ -286,18 +295,12 @@ def _each_run(
     """
     warnings = []
     seen: dict[str, int] = {}
-    for case in document.get("cases") or []:
-        if not isinstance(case, dict):
-            continue
-        name = str(case.get("name"))
+    for case in document.cases:
+        name = case.name
         seen[name] = seen.get(name, 0) + 1
-        arms = case.get("arms") or {}
-        for arm in ARMS:
-            for index, run in enumerate(arms.get(arm) or [], start=1):
-                if isinstance(run, dict):
-                    warnings += _one_run(
-                        output_dir, root, name, index, run, seen[name], granted, arm
-                    )
+        for arm, runs in ((ARM_WITH, case.arms.with_), (ARM_WITHOUT, case.arms.without or [])):
+            for index, run in enumerate(runs, start=1):
+                warnings += _one_run(output_dir, root, name, index, run, seen[name], granted, arm)
     return warnings
 
 
@@ -306,7 +309,7 @@ def _one_run(
     root: Path,
     case: str,
     index: int,
-    run: dict[str, Any],
+    run: RunEntry,
     occurrence: int,
     granted: tuple[str, ...],
     arm: str = ARM_WITH,
@@ -326,7 +329,7 @@ def _one_run(
     if source is None:
         # A run that already carries an error says why there is nothing to collect, and a
         # second line saying it again is noise. The verdict line prints the error either way.
-        return [] if run.get("error") else [f"{where}: {missing}"]
+        return [] if run.error else [f"{where}: {missing}"]
 
     if not source.session:
         logs.unseal(source.trace.parent.parent)
@@ -337,7 +340,7 @@ def _one_run(
     except OSError as error:
         return [f"{where}: the trace could not be collected: {error}"]
 
-    run["tracePath"] = str(trace)
+    run.trace_path = str(trace)
     try:
         records = None if source.session else _records(trace)
     except OSError as error:
@@ -349,7 +352,7 @@ def _one_run(
     )
 
 
-def _source(root: Path, run: dict[str, Any]) -> tuple[Source | None, str | None]:
+def _source(root: Path, run: RunEntry) -> tuple[Source | None, str | None]:
     """Where one run's artefacts are, or the reason there are none.
 
     The rule that decides which backend produced the run is the `cowork` key: this
@@ -357,22 +360,22 @@ def _source(root: Path, run: dict[str, Any]) -> tuple[Source | None, str | None]
     docs/cowork_backend.md. It is the key and never its value, because a run the driver
     could not start carries the key with a null `sessionDir`.
     """
-    if COWORK in run:
+    if run.cowork is not None:
         return _session_source(run)
     return _sandbox_source(root, run)
 
 
-def _session_source(run: dict[str, Any]) -> tuple[Source | None, str | None]:
+def _session_source(run: RunEntry) -> tuple[Source | None, str | None]:
     """A CoWork run: the transcript the driver found, and the session's produced files.
 
     `outputs/` is the workspace on this backend, which is the same rule `grader.py` applies
     to a `file_exists` grader and to a `{source: file}` target.
     """
-    session = (run.get(COWORK) or {}).get(SESSION_DIR)
-    if not isinstance(session, str) or not session:
+    session = run.cowork.session_dir if run.cowork is not None else None
+    if not session:
         return None, "the run reached no session directory"
-    transcript = run.get("tracePath")
-    if not isinstance(transcript, str) or not transcript:
+    transcript = run.trace_path
+    if not transcript:
         return None, "the session wrote no transcript"
     return Source(
         trace=Path(transcript),
@@ -381,14 +384,14 @@ def _session_source(run: dict[str, Any]) -> tuple[Source | None, str | None]:
     ), None
 
 
-def _sandbox_source(root: Path, run: dict[str, Any]) -> tuple[Source | None, str | None]:
+def _sandbox_source(root: Path, run: RunEntry) -> tuple[Source | None, str | None]:
     """A harness run: the kept sandbox its `tracePath` names, on the host.
 
     The document's path is the container's, `<TMPDIR>/claude-eval-XXXXXX/out/trace.jsonl`,
     and only its sandbox component is read: the host half of the same mount is `root`.
     """
-    named = run.get("tracePath")
-    if not isinstance(named, str) or not named:
+    named = run.trace_path
+    if not named:
         return None, f"tracePath names no kept sandbox: {named!r}"
     path = Path(named)
     if path.name != SANDBOX_TRACE or path.parent.name != SANDBOX_OUT:
@@ -413,7 +416,7 @@ def _keep_trace(source: Source, destination: Path) -> Path:
 def _keep_last_message(
     source: Source,
     trace: Path,
-    records: list[dict[str, Any]] | None,
+    records: list[TraceRecord] | None,
     destination: Path,
     where: str,
 ) -> list[str]:
@@ -487,19 +490,16 @@ def _take(source: Source, origin: Path, destination: Path) -> None:
 # The document, and the sandboxes afterwards.
 
 
-def _document(output_dir: Path) -> tuple[dict[str, Any], str | None]:
+def _document(output_dir: Path) -> tuple[ResultDocument | None, str | None]:
     """The result document, or the one line saying why the sandboxes cannot be mapped."""
     path = output_dir / RESULT_NAME
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        return ResultDocument.read(path), None
     except (OSError, ValueError) as error:
-        return {}, f"{path}: no result document to map the kept sandboxes onto: {error}"
-    if not isinstance(document, dict):
-        return {}, f"{path}: expected a mapping at the top level"
-    return document, None
+        return None, f"{path}: no result document to map the kept sandboxes onto: {error}"
 
 
-def _rewrite(output_dir: Path, document: dict[str, Any]) -> list[str]:
+def _rewrite(output_dir: Path, document: ResultDocument) -> list[str]:
     try:
         results.write(output_dir, document)
     except OSError as error:
@@ -518,8 +518,8 @@ def _remove(root: Path) -> list[str]:
 # Reading a trace.
 
 
-def _records(trace: Path | str) -> list[dict[str, Any]]:
-    """Every JSON object in the trace, in order. An unparsable line is skipped.
+def _records(trace: Path | str) -> list[TraceRecord]:
+    """Every record in the trace, in order. A line that does not parse as one is skipped.
 
     The harness writes one object per line and the file is read whole, so a line a
     truncated trace left half written is dropped rather than stopping the read.
@@ -528,42 +528,35 @@ def _records(trace: Path | str) -> list[dict[str, Any]]:
     found = []
     for line in text.splitlines():
         try:
-            record = json.loads(line)
-        except ValueError:
+            found.append(TraceRecord.model_validate_json(line))
+        except ValidationError:
             continue
-        if isinstance(record, dict):
-            found.append(record)
     return found
 
 
-def _final(records: list[dict[str, Any]]) -> str | None:
+def _final(records: list[TraceRecord]) -> str | None:
     """The final assistant message of an already-read harness trace. `last_message` over
     records, so one read answers the message and both checks."""
     final = None
     fallback = None
     for record in records:
-        kind = record.get("type")
-        if kind == "result" and isinstance(record.get("result"), str):
-            final = record["result"]
-        elif kind == "assistant":
+        if record.type == "result" and record.result is not None:
+            final = record.result
+        elif record.type == "assistant":
             text = _assistant_text(record)
             if text:
                 fallback = text
     return final if final is not None else fallback
 
 
-def _assistant_text(record: dict[str, Any]) -> str:
+def _assistant_text(record: TraceRecord) -> str:
     """The text blocks of one assistant record, joined. A thinking block is not text."""
-    message = record.get("message")
-    content = message.get("content") if isinstance(message, dict) else None
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
+    if not isinstance(record.message, Message):
         return ""
+    if isinstance(record.message.content, str):
+        return record.message.content
     return "".join(
-        block["text"]
-        for block in content
-        if isinstance(block, dict)
-        and block.get("type") == "text"
-        and isinstance(block.get("text"), str)
+        block.text
+        for block in record.message.content
+        if block.type == "text" and block.text is not None
     )

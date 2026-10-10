@@ -86,6 +86,26 @@ exception's message there, and its traceback in `checks.jsonl`.
 A failing check never stops the command. Every failure above is a failed check carrying its
 reason, and the rest of the suite goes on.
 
+## Advisory checks
+
+`@check(advisory=True)` marks a check advisory. It runs like any other check, and its result is
+appended to the run's `graders[]` with its verdict kept. Its definition in the case's
+`graders[]` carries `type: check-advisory`, and its result carries `scored: false`.
+
+An advisory check is out of the run's `score` and out of the exit code. A failed advisory check
+prints as a `NOTE` line and never fails the run.
+
+```python
+from cowork_evals.checks import Result, Run, check
+
+
+@check(advisory=True)
+def totals_are_rounded(run: Run) -> Result:
+    book = openpyxl.load_workbook(run.file("totals.xlsx"))
+    total = book.active["D10"].value
+    return Result(passed=total == round(total), explanation=f"D10 is {total}")
+```
+
 ## The Run object
 
 Each check is called with one `Run`, which describes one execution of the case. Every field is
@@ -101,6 +121,8 @@ produced the run.
 | `run_dir`      | the collected run directory, and the judge's working directory   |
 | `scratch`      | a directory a check may write into                               |
 | `index`        | which run of the case this is, 1-based, as the verdict prints it |
+
+A run with no `last_message.txt` has `last_message` `""`.
 
 `run.file(name)` resolves one name under `workspace`. A name that resolves to nothing, and a
 name that leaves the workspace, each fail the check naming it.

@@ -1,14 +1,15 @@
 """The CoWork backend: which case this backend can run, and what running one produces.
 
 The layer above the driver. It reads the case tree `cases.py` produced, submits each case's
-prompt through `CoWork`, grades the session document, and writes the same
-`aggregate-result.json` v1 document every other backend writes.
+prompt through `CoWork`, grades the `SessionDocument` each run returns, and writes the same
+`aggregate-result.json` v1 document every other backend writes, as a `ResultDocument`. Each
+run is a `RunEntry` built from its session document, and each case a `CaseEntry` built from
+the case and its runs.
 
 What this backend cannot run is docs/eval_format.md: a case asking for something a live session
 does not offer carries the `no-cowork` tag, submits nothing here and is counted rather than
 failed. It reads the tag and decides no case skip of its own. A key the case left to its default
-is not a request, which is why this reads `Case.frontmatter_keys` and `Case.case_yaml_keys` and
-never a merged value.
+is not a request, which is why this reads which keys a case wrote and never a merged value.
 """
 
 from __future__ import annotations
@@ -16,16 +17,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from .cases import EVAL_DIR, JUDGED, NO_COWORK, Case, CaseError, discover, plugin_roots
 from .config import Config, CoWorkError
-from .cowork import CoWork
+from .cowork import CoWork, SessionDocument
 from .grader import grade as grade_structural
 from .grader import skipped as skipped_result
 from .judge import grade as grade_judged
 from .judge import resolve_model
-from .results import CaseResult, Run, build, write
+from .results import CaseEntry, ResultDocument, RunEntry, build, write
 
 # The MCP stand-in directory. Its three layers, suite, group and case, are
 # docs/claude_code/plugin_eval_reference.md.
@@ -101,7 +101,7 @@ def grader_skips(case: Case) -> dict[str, str]:
     skipped = {}
     for grader in case.graders:
         for key in ("target", "focus"):
-            if grader.config.get(key) == MOCK_CALLS:
+            if getattr(grader.config, key, None) == MOCK_CALLS:
                 skipped[grader.name] = f"{key}: {MOCK_CALLS}, and no stand-in serves a CoWork run"
                 break
     return skipped
@@ -257,10 +257,10 @@ def run(
 
     model = resolve_model(judge_model, resolved)
     started = datetime.now(timezone.utc)
-    results = [_run_case(entry, resolved, model) for entry in prepared.entries]
-    document = build(
+    cases = [_run_case(entry, prepared.root, resolved, model) for entry in prepared.entries]
+    document: ResultDocument = build(
         root=prepared.root,
-        cases=results,
+        cases=cases,
         started_at=started.isoformat(),
         duration_seconds=(datetime.now(timezone.utc) - started).total_seconds(),
         judge_model=model,
@@ -273,20 +273,23 @@ def run(
 # One case, and one run of it.
 
 
-def _run_case(entry: Entry, config: Config, model: str) -> CaseResult:
-    """Every run of one case. A declared case submits nothing and leaves `arms.with` empty."""
+def _run_case(entry: Entry, root: Path, config: Config, model: str) -> CaseEntry:
+    """Every run of one case, as its `CaseEntry`.
+
+    A declared case submits nothing and leaves `arms.with` empty.
+    """
     if entry.declared is not None:
-        return CaseResult(case=entry.case, declared=True, declared_reason=entry.declared)
+        return CaseEntry.build(entry.case, root, declared_reason=entry.declared)
 
     # `Config` is frozen, so a differing timeout is a differing `CoWork`. The ceiling and
     # the run log are files, and still count across instances.
     driver = CoWork(config.cowork, run_timeout=entry.timeout_seconds)
-    return CaseResult(
-        case=entry.case, runs=tuple(_one_run(driver, entry, model) for _ in range(entry.runs))
+    return CaseEntry.build(
+        entry.case, root, tuple(_one_run(driver, entry, model) for _ in range(entry.runs))
     )
 
 
-def _one_run(driver: CoWork, entry: Entry, model: str) -> Run:
+def _one_run(driver: CoWork, entry: Entry, model: str) -> RunEntry:
     """One submission. A `CoWorkError` becomes this run's error, and the suite continues."""
     try:
         session = driver.run(entry.case.prompt)
@@ -295,7 +298,7 @@ def _one_run(driver: CoWork, entry: Entry, model: str) -> Run:
     return _graded(session, entry, model)
 
 
-def _after_failure(driver: CoWork, entry: Entry, model: str, error: CoWorkError) -> Run:
+def _after_failure(driver: CoWork, entry: Entry, model: str, error: CoWorkError) -> RunEntry:
     """What is still readable after the driver raised.
 
     A run timeout is collected: the error carries the session directory, the CoWork session
@@ -310,14 +313,18 @@ def _after_failure(driver: CoWork, entry: Entry, model: str, error: CoWorkError)
         try:
             session = driver.collect(error.session_dir, prompt=entry.case.prompt)
         except CoWorkError:
-            return Run(
+            return RunEntry.graded(
                 session_dir=session_dir, timeout_seconds=entry.timeout_seconds, error=message
             )
         return _graded(session, entry, model, error=message)
-    return Run(session_dir=session_dir, timeout_seconds=entry.timeout_seconds, error=message)
+    return RunEntry.graded(
+        session_dir=session_dir, timeout_seconds=entry.timeout_seconds, error=message
+    )
 
 
-def _graded(session: dict[str, Any], entry: Entry, model: str, *, error: str | None = None) -> Run:
+def _graded(
+    session: SessionDocument, entry: Entry, model: str, *, error: str | None = None
+) -> RunEntry:
     """Every grader of one case against one session document, structural then judged."""
     results = []
     judge_cost = 0.0
@@ -331,7 +338,7 @@ def _graded(session: dict[str, Any], entry: Entry, model: str, *, error: str | N
             judge_cost += judged.cost_usd
         else:
             results.append(grade_structural(grader, session))
-    return Run.collected(
+    return RunEntry.collected(
         session,
         tuple(results),
         timeout_seconds=entry.timeout_seconds,
@@ -364,16 +371,12 @@ def _one_plugin_root(target: Path | str) -> Path:
 def _effective_runs(case: Case, override: int | None) -> int:
     if override is not None:
         return override
-    declared = case.frontmatter_keys.get("runs")
-    if isinstance(declared, int) and not isinstance(declared, bool):
-        return declared
-    return DEFAULT_RUNS
+    declared = case.frontmatter.runs
+    return DEFAULT_RUNS if declared is None else declared
 
 
 def _effective_timeout(case: Case, override: float | None, configured: float) -> float:
     if override is not None:
         return float(override)
-    declared = case.frontmatter_keys.get("timeout_seconds")
-    if isinstance(declared, int | float) and not isinstance(declared, bool):
-        return float(declared)
-    return float(configured)
+    declared = case.frontmatter.timeout_seconds
+    return float(configured) if declared is None else declared

@@ -1,0 +1,2 @@
+{"type":"user","uuid":"u-0007","session_id":"s-0007","client_platform":"desktop_app","timestamp":"2026-09-08T16:00:00.000Z","message":{"role":"user","content":"Reply with exactly: PING"}}
+{"type":"command_lifecycle","command_uuid":"c-0007","state":"queued","session_id":"s-0007","timestamp":"2026-09-08T16:00:00.100Z"}

@@ -14,7 +14,6 @@ exits 2. Its design stays in docs/staged_runtime.md.
 from __future__ import annotations
 
 import argparse
-import json
 import shutil
 import sys
 from dataclasses import dataclass, field
@@ -39,8 +38,8 @@ from . import (
 )
 from .cases import CaseError, discover, plugin_name, plugin_roots
 from .config import ABLATION_CHOICES, Config, CoWorkError, CoWorkSection, EvalSection, checked
-from .cowork import CoWork
-from .docker import Condition, Docker, DockerError, pytest_image, remedy
+from .cowork import CoWork, SessionDocument
+from .docker import Condition, Docker, DockerError, Image, pytest_image, remedy
 from .docker.pytest_image import PytestImage
 from .harness import RunOptions
 from .preflight import COWORK, DOCKER, TEST
@@ -991,7 +990,7 @@ def _ask_failure(args: argparse.Namespace, config: Config, prompt: str, error: C
     return _refuse([message], FAILED)
 
 
-def _ask_print(session: dict[str, Any], args: argparse.Namespace) -> int:
+def _ask_print(session: SessionDocument, args: argparse.Namespace) -> int:
     """The answer on stdout, and what produced it on stderr.
 
     The split is so that `cowork_evals ask --cowork "..." > answer.txt` holds the answer and
@@ -1000,17 +999,17 @@ def _ask_print(session: dict[str, Any], args: argparse.Namespace) -> int:
     in it already. docs/cli.md.
     """
     if args.json:
-        print(json.dumps(session, indent=2))
+        print(session.model_dump_json(indent=2))
         return OK
 
-    print(session["final_text"])
-    assistant = sum(1 for turn in session["turns"] if turn["role"] == "assistant")
+    print(session.final_text)
+    assistant = sum(1 for turn in session.turns if turn.role == "assistant")
     for label, value in (
-        ("session", session["session_dir"]),
+        ("session", session.session_dir),
         ("assistant turns", assistant),
-        ("tools", ", ".join(session["tool_names"])),
-        ("outputs", ", ".join(session["outputs"])),
-        ("log", session["log_file"]),
+        ("tools", ", ".join(session.tool_names)),
+        ("outputs", ", ".join(session.outputs)),
+        ("log", session.log_file),
     ):
         if value:
             print(f"{label}: {value}", file=sys.stderr)
@@ -1107,9 +1106,9 @@ def _login(args: argparse.Namespace, config: Config) -> int:
         return OK
 
     blocking = [
-        message
-        for condition, message in image.check()
-        if condition in (Condition.DAEMON, Condition.IMAGE)
+        line.message
+        for line in image.check()
+        if line.condition in (Condition.DAEMON, Condition.IMAGE)
     ]
     if blocking:
         return _refuse(blocking, PREFLIGHT_FAILED)
@@ -1310,17 +1309,13 @@ def _prune(args: argparse.Namespace, config: Config) -> int:
     return OK
 
 
-def _stale(
-    inventory: list[tuple[datetime, str]] | list[tuple[str, datetime]],
-    current: set[str],
-    cutoff: datetime,
-) -> list[str]:
+def _stale(inventory: list[Image], current: set[str], cutoff: datetime) -> list[str]:
     """Which tags a prune removes: neither current digest, and built before the cutoff.
 
     Separate from `_prune_images` so the rule is asserted against a hand-written inventory
     rather than against whatever images a machine happens to hold.
     """
-    return [tag for tag, created in inventory if tag not in current and created < cutoff]
+    return [image.tag for image in inventory if image.tag not in current and image.created < cutoff]
 
 
 def _prune_images(config: Config, days: int) -> None:

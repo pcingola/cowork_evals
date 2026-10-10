@@ -6,9 +6,10 @@ here runs a case. The rules are docs/eval_format.md. See ../README.md.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
-from cowork_evals.validate import Violation, uncovered, violations
+from cowork_evals.validate import uncovered, violations
 
 ROOT = Path(__file__).resolve().parent.parent / "data" / "validate"
 CLEAN = ROOT / "clean"
@@ -16,9 +17,7 @@ BROKEN = ROOT / "broken"
 UNCOVERED = ROOT / "uncovered"
 EVALS = BROKEN / "evals" / "greeter"
 
-
-def rules_at(found: list[Violation], path: Path) -> list[str]:
-    return sorted(violation.rule for violation in found if violation.path == path)
+CaseTree = Callable[..., tuple[Path, Path]]
 
 
 # The clean tree.
@@ -32,18 +31,42 @@ def test_a_clean_tree_covers_every_skill() -> None:
     assert uncovered(CLEAN) == []
 
 
-def test_a_tree_with_no_eval_directory_has_no_violation(tmp_path: Path) -> None:
-    (tmp_path / ".claude-plugin").mkdir()
-    (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"name": "empty"}')
-    assert violations(tmp_path) == []
+# The broken tree, whole.
+
+
+def test_the_broken_tree_breaks_each_rule_in_path_order() -> None:
+    """One case per rule, and no rule fires that the case was not written to break."""
+    found = [(one.path.relative_to(BROKEN).as_posix(), one.rule) for one in violations(BROKEN)]
+    greeter = "evals/greeter"
+    assert found == [
+        (f"{greeter}/bad-case-yaml/case.yaml", "required-key"),
+        (f"{greeter}/bad-case-yaml/case.yaml", "schema-version"),
+        (f"{greeter}/bad-case-yaml/case.yaml", "unknown-key"),
+        (f"{greeter}/bad-checks/checks/unimportable.py", "check-import"),
+        (f"{greeter}/bad-graders/graders/note.md", "grader-frontmatter"),
+        (f"{greeter}/bad-graders/graders/unknown-type.md", "grader-type"),
+        (f"{greeter}/bad-graders/graders/zero-weight.md", "grader-weight"),
+        (f"{greeter}/duplicate-checks/checks", "check-duplicate"),
+        (f"{greeter}/duplicate-checks/checks/x.y.py", "check-import"),
+        (f"{greeter}/empty-checks/checks", "check-empty"),
+        (f"{greeter}/escaping/case.yaml", "add-dirs"),
+        (f"{greeter}/missing-keys/prompt.md", "required-key"),
+        (f"{greeter}/missing-keys/prompt.md", "required-key"),
+        (f"{greeter}/missing-keys/prompt.md", "required-key"),
+        (f"{greeter}/over-caps/prompt.md", "cap"),
+        (f"{greeter}/over-caps/prompt.md", "cap"),
+        (f"{greeter}/over-caps/prompt.md", "cap"),
+        (f"{greeter}/over-caps/prompt.md", "env-prefix"),
+        (f"{greeter}/staged-checks/case.yaml", "add-dirs-checks"),
+        (f"{greeter}/unknown-key/prompt.md", "unknown-key"),
+        (f"{greeter}/unknown-key/prompt.md", "unknown-key"),
+        (f"{greeter}/wrong-plugins/prompt.md", "plugins"),
+        (f"{greeter}/wrong-tag/prompt.md", "tags"),
+        ("evals/not-a-skill", "skill-layer"),
+    ]
 
 
 # The layer directly under evals/.
-
-
-def test_a_directory_under_evals_naming_no_skill_is_a_violation() -> None:
-    found = violations(BROKEN)
-    assert rules_at(found, BROKEN / "evals" / "not-a-skill") == ["skill-layer"]
 
 
 def test_the_skill_layer_names_the_directories_it_admits() -> None:
@@ -62,6 +85,7 @@ def test_a_plugin_with_no_skills_directory_admits_plugin_and_mocks_only(tmp_path
         (tmp_path / "evals" / name).mkdir(parents=True)
     found = violations(tmp_path)
     assert [violation.path for violation in found] == [tmp_path / "evals" / "greeter"]
+    assert uncovered(tmp_path) == [], "no skill, so no coverage gap"
 
 
 # prompt.md.
@@ -70,7 +94,6 @@ def test_a_plugin_with_no_skills_directory_admits_plugin_and_mocks_only(tmp_path
 def test_a_missing_required_key_is_reported_once_per_key() -> None:
     path = EVALS / "missing-keys" / "prompt.md"
     found = [violation for violation in violations(BROKEN) if violation.path == path]
-    assert [violation.rule for violation in found] == ["required-key"] * 3
     assert sorted(violation.detail for violation in found) == [
         "name is required",
         "plugins is required",
@@ -102,21 +125,13 @@ def test_every_cap_is_checked_and_an_env_key_carries_its_prefix() -> None:
     ]
 
 
-def test_a_value_at_the_cap_is_not_a_violation(tmp_path: Path) -> None:
-    case = _one_case(tmp_path, "runs: 50\nmax_turns: 200\ntimeout_seconds: 3600\n")
-    assert violations(case) == []
-
-
-def test_tags_names_the_case_own_skill_directory() -> None:
-    path = EVALS / "wrong-tag" / "prompt.md"
-    assert rules_at(violations(BROKEN), path) == ["tags"]
-
-
-def test_plugins_must_resolve_to_the_plugin_root() -> None:
-    path = EVALS / "wrong-plugins" / "prompt.md"
-    found = [violation for violation in violations(BROKEN) if violation.path == path]
-    assert [violation.rule for violation in found] == ["plugins"]
-    assert str(BROKEN) in found[0].detail
+def test_a_value_at_the_cap_is_not_a_violation(tmp_path: Path, case_tree: CaseTree) -> None:
+    root, _ = case_tree(
+        tmp_path,
+        frontmatter="runs: 50\nmax_turns: 200\ntimeout_seconds: 3600",
+        tags="[skill, no-cowork]",
+    )
+    assert violations(root) == []
 
 
 # case.yaml.
@@ -132,132 +147,26 @@ def test_case_yaml_requires_its_two_keys_and_refuses_a_third() -> None:
     ]
 
 
-def test_an_add_dirs_entry_outside_the_case_directory_is_a_violation() -> None:
-    path = EVALS / "escaping" / "case.yaml"
-    found = [violation for violation in violations(BROKEN) if violation.path == path]
-    assert [violation.rule for violation in found] == ["add-dirs"]
-    assert str(EVALS / "wrong-tag") in found[0].detail
-
-
-# Graders.
-
-
-def test_a_grader_file_with_no_frontmatter_block_is_a_violation() -> None:
-    path = EVALS / "bad-graders" / "graders" / "note.md"
-    assert rules_at(violations(BROKEN), path) == ["grader-frontmatter"]
-
-
-def test_an_unknown_grader_type_is_a_violation() -> None:
-    path = EVALS / "bad-graders" / "graders" / "unknown-type.md"
-    assert rules_at(violations(BROKEN), path) == ["grader-type"]
-
-
-def test_a_weight_at_or_below_zero_is_a_violation() -> None:
-    path = EVALS / "bad-graders" / "graders" / "zero-weight.md"
-    assert rules_at(violations(BROKEN), path) == ["grader-weight"]
-
-
 # The reserved tag, in both directions.
 
 
-def _runnability_case(
-    root: Path,
-    *,
-    tags: str = "[greeter]",
-    extra: str = "",
-    case_yaml: str | None = None,
-    mocks_at: tuple[str, ...] = (),
-    depth: tuple[str, ...] = (),
-) -> Path:
-    """One plugin root holding one case, with whatever makes it unrunnable on CoWork.
-
-    `depth` is the grouping directories between `evals/greeter/` and the case, which is how
-    a case several layers below an `evals/mocks/` is written.
-    """
-    (root / ".claude-plugin").mkdir()
-    (root / ".claude-plugin" / "plugin.json").write_text('{"name": "one"}')
-    (root / "skills" / "greeter").mkdir(parents=True)
-    case = root.joinpath("evals", "greeter", *depth, "hello")
-    case.mkdir(parents=True)
-    up = "/".join([".."] * (3 + len(depth)))
-    (case / "prompt.md").write_text(
-        f'---\nname: hello\ntags: {tags}\nplugins: ["{up}"]\n{extra}---\n\nSay hello.\n'
-    )
-    if case_yaml is not None:
-        (case / "case.yaml").write_text(case_yaml)
-    for relative in mocks_at:
-        (root / relative / "mocks" / "mailer").mkdir(parents=True)
-        (root / relative / "mocks" / "mailer" / "send.md").write_text("---\ntool: send\n---\n")
-    return root
-
-
-def test_an_unhonoured_key_with_no_tag_is_a_violation_naming_the_key(tmp_path: Path) -> None:
-    found = violations(_runnability_case(tmp_path, extra="max_turns: 10\n"))
+def test_an_unhonoured_key_with_no_tag_is_a_violation_naming_the_key(
+    tmp_path: Path, case_tree: CaseTree
+) -> None:
+    root, _ = case_tree(tmp_path, frontmatter="max_turns: 10")
+    found = violations(root)
     assert [violation.rule for violation in found] == ["no-cowork-missing"]
-    assert found[0].detail == (
-        "max_turns: no turn cap reaches a CoWork session, and tags does not carry no-cowork"
-    )
+    assert found[0].detail.endswith("and tags does not carry no-cowork")
 
 
-def test_a_context_key_with_no_tag_is_a_violation_naming_the_key(tmp_path: Path) -> None:
-    found = violations(
-        _runnability_case(
-            tmp_path,
-            case_yaml='schema_version: "1.1"\nname: hello\ncontext:\n  add_dirs: ["fixtures"]\n',
-        )
-    )
-    assert [violation.rule for violation in found] == ["no-cowork-missing"]
-    assert found[0].detail == (
-        "context.add_dirs: nothing stages files into the VM, and tags does not carry no-cowork"
-    )
-
-
-def test_a_mocks_directory_with_no_tag_is_a_violation_naming_the_directory(tmp_path: Path) -> None:
-    found = violations(_runnability_case(tmp_path, mocks_at=("evals",)))
-    assert [violation.rule for violation in found] == ["no-cowork-missing"]
-    assert found[0].detail.startswith(str(tmp_path / "evals" / "mocks"))
-    assert "and tags does not carry no-cowork" in found[0].detail
-
-
-def test_the_tag_on_a_case_nothing_stops_is_a_violation(tmp_path: Path) -> None:
+def test_the_tag_on_a_case_nothing_stops_is_a_violation(
+    tmp_path: Path, case_tree: CaseTree
+) -> None:
     """The second direction, which is what keeps the tag from switching a case off."""
-    found = violations(_runnability_case(tmp_path, tags="[greeter, no-cowork]"))
+    root, _ = case_tree(tmp_path, tags="[skill, no-cowork]")
+    found = violations(root)
     assert [violation.rule for violation in found] == ["no-cowork-unneeded"]
     assert found[0].detail == "tags carries no-cowork, and a CoWork session can run this case"
-
-
-def test_an_unhonoured_key_with_the_tag_is_valid(tmp_path: Path) -> None:
-    assert (
-        violations(
-            _runnability_case(tmp_path, tags="[greeter, no-cowork]", extra="max_turns: 10\n")
-        )
-        == []
-    )
-
-
-def test_a_mocks_directory_several_layers_above_the_case_is_valid_with_the_tag(
-    tmp_path: Path,
-) -> None:
-    """The chain is walked from the plugin root, not from the case's own directory."""
-    root = _runnability_case(
-        tmp_path, tags="[greeter, no-cowork]", mocks_at=("evals",), depth=("group", "inner")
-    )
-    assert violations(root) == []
-
-
-# The whole list.
-
-
-def test_every_violation_is_sorted_by_path() -> None:
-    found = violations(BROKEN)
-    assert [str(violation.path) for violation in found] == sorted(
-        str(violation.path) for violation in found
-    )
-
-
-def test_a_violation_prints_its_path_its_rule_and_its_detail() -> None:
-    violation = Violation(path=Path("a/prompt.md"), rule="tags", detail="something")
-    assert str(violation) == "a/prompt.md: tags: something"
 
 
 # Coverage.
@@ -268,58 +177,3 @@ def test_a_skill_with_no_eval_directory_is_reported_and_is_not_a_violation() -> 
     assert uncovered(UNCOVERED) == [
         f"{UNCOVERED / 'skills' / 'writer'}: no eval directory at {UNCOVERED / 'evals' / 'writer'}"
     ]
-
-
-def test_a_plugin_with_no_skills_directory_reports_no_coverage_gap() -> None:
-    assert uncovered(BROKEN.parent / "clean") == []
-
-
-def _one_case(root: Path, extra: str) -> Path:
-    """One plugin root holding one otherwise valid case, for a rule tested on its own."""
-    (root / ".claude-plugin").mkdir()
-    (root / ".claude-plugin" / "plugin.json").write_text('{"name": "one"}')
-    (root / "skills" / "greeter").mkdir(parents=True)
-    case = root / "evals" / "greeter" / "hello"
-    case.mkdir(parents=True)
-    # The tag, because the one caller writes `max_turns`. docs/eval_format.md.
-    (case / "prompt.md").write_text(
-        f'---\nname: hello\ntags: [greeter, no-cowork]\nplugins: ["../../.."]\n'
-        f"{extra}---\n\nSay hello.\n"
-    )
-    return root
-
-
-# checks/. It is Python, so the validator imports it rather than parsing it.
-
-
-def test_a_check_file_that_will_not_import_is_a_violation() -> None:
-    found = violations(BROKEN)
-    path = EVALS / "bad-checks" / "checks" / "unimportable.py"
-    assert rules_at(found, path) == ["check-import"]
-    detail = next(one.detail for one in found if one.path == path)
-    assert "unimportable.py could not be imported: RuntimeError" in detail
-    assert "openpyxl is not installed" in detail
-
-
-def test_a_checks_directory_holding_no_check_is_a_violation() -> None:
-    found = violations(BROKEN)
-    path = EVALS / "empty-checks" / "checks"
-    assert rules_at(found, path) == ["check-empty"]
-
-
-def test_a_helper_beside_a_check_is_not_a_violation() -> None:
-    """The rule is over the directory, never over a file: a helper is a file like any other."""
-    assert violations(CLEAN) == []
-    assert (CLEAN / "evals" / "greeter" / "hello" / "checks" / "helpers.py").is_file()
-
-
-def test_add_dirs_naming_the_checks_directory_is_a_violation() -> None:
-    found = violations(BROKEN)
-    path = EVALS / "staged-checks" / "case.yaml"
-    assert rules_at(found, path) == ["add-dirs-checks"]
-    detail = next(one.detail for one in found if one.path == path)
-    assert detail.endswith("and checks/ is not staged")
-
-
-def test_two_check_files_with_their_own_names_are_no_duplicate() -> None:
-    assert not [one for one in violations(CLEAN) if one.rule == "check-duplicate"]

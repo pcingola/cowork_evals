@@ -410,18 +410,15 @@ def _check_violations(case: Case) -> list[Violation]:
     A `checks/` directory holding no check at all asserts nothing while looking as if it
     does. A single file holding none is not a violation: a helper beside a check is a file
     like any other, which is why the rule is over the directory and never over a file.
+
+    A file that fails to import is still a check, named for its file, so it can collide with
+    a check of the same name: `x.y.py` and check `y` in `x.py` are both `x.y`. Both rules are
+    reported.
     """
     directory = case.directory / CHECKS_DIR
     if not directory.is_dir():
         return []
     found = discover_checks(case.directory)
-    broken = [
-        Violation(path=one.path, rule="check-import", detail=one.error)
-        for one in found
-        if one.error is not None
-    ]
-    if broken:
-        return broken
     if not found:
         return [
             Violation(
@@ -430,7 +427,12 @@ def _check_violations(case: Case) -> list[Violation]:
                 detail=f"no file under {CHECKS_DIR}/ carries a function decorated with @check",
             )
         ]
-    return [
+    broken = [
+        Violation(path=one.path, rule="check-import", detail=one.error)
+        for one in found
+        if one.error is not None
+    ]
+    return broken + [
         Violation(
             path=directory,
             rule="check-duplicate",

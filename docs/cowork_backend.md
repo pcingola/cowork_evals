@@ -160,11 +160,19 @@ unreadable file are each a failed grader carrying the reason.
 ## The judge
 
 `llm` and `baseline` are answered by `claude -p --output-format json --model <model>
---strict-mcp-config`, with the rubric, the material and a closing instruction sent as one
-text on stdin. Three votes, and the grader passes on two `PASS` answers. A reply that is
-neither word is a lost vote and is not a `PASS`; three lost votes are a failed grader naming
-the reason. `--strict-mcp-config` keeps the developer's own MCP servers out of a text vote.
-The material is truncated head and tail as the harness truncates it.
+--strict-mcp-config --json-schema <schema>`, with the rubric, the material and a closing
+instruction sent as one text on stdin. Three votes, and the grader passes on two `PASS`
+answers. A reply that is neither word is a lost vote and is not a `PASS`; three lost votes are
+a failed grader naming the reason. `--strict-mcp-config` keeps the developer's own MCP servers
+out of a text vote. The material is truncated head and tail as the harness truncates it.
+
+The schema is an object with exactly two required string keys: `reasoning`, and `verdict`,
+which is `PASS` or `FAIL`. The CLI enforces it and prints the answer as `structured_output`
+beside `result`. A reply is read from `structured_output` when it carries one, and from
+`result` as a bare word otherwise. A `verdict` outside the schema is a lost vote. The
+grader's `explanation` is `judge votes: ` and the votes in order, then the first 400
+characters of the first non-empty `reasoning` on the winning side. A bare-word reply carries
+no reasoning.
 
 The model is `--judge-model` where one was given and `eval.judge_model` otherwise. The
 signed-in `claude` on `PATH` is the one credential route, which is why [cli.md](cli.md) makes

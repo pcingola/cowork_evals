@@ -35,6 +35,7 @@ cowork_evals --version
   runs. There is no sweep verb.
 - Options are named. Nothing is forwarded raw to `claude plugin eval`. `test` is the one verb
   with a raw tail, and the tail goes to pytest.
+- `--version` prints the installed `cowork-evals` version and exits 0.
 
 ## The path is the scope
 
@@ -321,7 +322,8 @@ There is no `--tag` and no `--case`. The columns, the exit codes and the records
 
 `cowork_evals docs` prints the directory this documentation is installed in, then every
 document name. `cowork_evals docs <name>` prints one document's path, and exits 2 on an unknown
-name.
+name. A name is matched against the listed names and never joined onto the directory, so no
+name reaches a file outside it.
 
 ## init
 

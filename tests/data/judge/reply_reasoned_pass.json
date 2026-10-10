@@ -1,0 +1,13 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 900,
+  "num_turns": 1,
+  "result": "{\"verdict\": \"PASS\", \"reasoning\": \"the command ran\"}",
+  "structured_output": {
+    "verdict": "PASS",
+    "reasoning": "the command ran"
+  },
+  "total_cost_usd": 0.0021
+}

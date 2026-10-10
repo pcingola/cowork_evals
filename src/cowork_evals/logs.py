@@ -27,6 +27,8 @@ from importlib import metadata
 from pathlib import Path
 from typing import BinaryIO
 
+from pydantic import BaseModel, ConfigDict
+
 from .cases import EVAL_DIR, plugin_name
 
 # The log root under the working directory, which `--out DIR` replaces whole.
@@ -151,6 +153,49 @@ def _unique(parent: Path, base: str) -> Path:
 # Recording.
 
 
+class RunEnvironment(BaseModel):
+    """What `env.txt` records: one `name: value` line per field, in field order.
+
+    A list is its names space-joined on one line. A field that is `None` or empty is no line,
+    so a field read back is in `model_fields_set` exactly when its line was written.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    cowork_evals: str
+    claude: str
+    python3: str
+    backend: str
+    image: str | None = None
+    env_passthrough: list[str] = []
+    session_env: list[str] = []
+    keep_env: list[str] = []
+
+    def text(self) -> str:
+        """The file's content."""
+        lines = []
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if isinstance(value, list):
+                value = " ".join(value)
+            if value:
+                lines.append(f"{name}: {value}\n")
+        return "".join(lines)
+
+    @classmethod
+    def read(cls, path: Path | str) -> RunEnvironment:
+        """`env.txt` at `path`, parsed back. It raises `OSError`, or `ValueError` for a file
+        that does not validate."""
+        fields: dict[str, str | list[str]] = {}
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            name, _, value = line.partition(": ")
+            fields[name] = value
+        for name in ("env_passthrough", "session_env", "keep_env"):
+            if name in fields:
+                fields[name] = str(fields[name]).split()
+        return cls.model_validate(fields)
+
+
 def write_env(
     run_directory: Path | str,
     backend: str,
@@ -159,7 +204,7 @@ def write_env(
     session_env: Sequence[str] = (),
     keep_env: Sequence[str] = (),
 ) -> Path:
-    """`env.txt`: one `name: value` line per row, in a fixed order.
+    """`env.txt`: the `RunEnvironment` of this invocation.
 
     A command that does not run records the failure on its own line rather than raising: a
     log that says why a version is unknown is worth more than an invocation that stops for
@@ -172,22 +217,18 @@ def write_env(
     `session_env` and `keep_env` are the container backend's as well, and are the other two
     lists of names a `Bash` call in the run kept. docs/docker.md, "The session environment".
     """
-    rows = [
-        ("cowork_evals", distribution_version()),
-        ("claude", _command_version(["claude", "--version"])),
-        ("python3", _command_version(["python3", "-V"])),
-        ("backend", backend),
-    ]
-    if image is not None:
-        rows.append(("image", image))
-    if env_passthrough:
-        rows.append(("env_passthrough", " ".join(env_passthrough)))
-    if session_env:
-        rows.append(("session_env", " ".join(session_env)))
-    if keep_env:
-        rows.append(("keep_env", " ".join(keep_env)))
+    environment = RunEnvironment(
+        cowork_evals=distribution_version(),
+        claude=_command_version(["claude", "--version"]),
+        python3=_command_version(["python3", "-V"]),
+        backend=backend,
+        image=image,
+        env_passthrough=list(env_passthrough),
+        session_env=list(session_env),
+        keep_env=list(keep_env),
+    )
     path = Path(run_directory) / ENV_FILE
-    path.write_text("".join(f"{name}: {value}\n" for name, value in rows), encoding="utf-8")
+    path.write_text(environment.text(), encoding="utf-8")
     return path
 
 

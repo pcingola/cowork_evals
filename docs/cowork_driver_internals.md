@@ -23,12 +23,12 @@ The driver is a library and nothing else. It has no entry point, no console scri
 application and reads host paths, and nothing it does belongs to a session. It is therefore
 not bound to 3.10; see [library.md](library.md).
 
-Two modules, and PyYAML.
+Two modules, PyYAML and pydantic.
 
 | Module                | Holds                                                                       |
 | --------------------- | --------------------------------------------------------------------------- |
 | `cowork_evals.config` | `cowork_evals.yaml`, the frozen `Config` and its sections, and `CoWorkError` |
-| `cowork_evals.cowork` | `CoWork`, the driver                                                        |
+| `cowork_evals.cowork` | `CoWork`, the driver, and the records it reads and returns                  |
 
 `Config`, its four sections, `CoWork` and `CoWorkError` are the names re-exported from
 `cowork_evals`, and they are what a consumer imports rather than reaching through the
@@ -57,17 +57,17 @@ cw = CoWork.from_file("other.yaml")
 doc = cw.run("Reply with exactly: PONG")  # submit, wait, collect
 ```
 
-| Method                              | Does                                                   | Returns                               | Fires |
-| ----------------------------------- | -------------------------------------------------------- | -------------------------------------- | ----- |
-| `from_file(path, **overrides)`      | Builds from a named configuration file                 | A `CoWork`                            | no    |
-| `run(prompt)`                       | `submit`, then `wait`, then `collect`                  | The session document                  | yes   |
-| `submit(prompt)`                    | Steps 1 to 7 of the sequence                           | The attributed session directory      | yes   |
-| `wait(session_dir)`                 | Step 8, the completion signal                          | The same directory                    | no    |
-| `collect(session_dir, prompt=None)` | Step 9, reading one session already on disk            | The session document                  | no    |
-| `sessions(root=None)`               | Every session directory under a root                   | Paths, sorted                         | no    |
-| `history(run_log=None)`             | The run log                                            | One dictionary per line, oldest first | no    |
-| `deep_link(prompt)`                 | Builds the URL, percent-encoding the prompt            | The URL                               | no    |
-| `recent()`                          | Submissions in the trailing 24 hours, from the run log | A count                               | no    |
+| Method                              | Does                                                   | Returns                                  | Fires |
+| ----------------------------------- | ------------------------------------------------------ | ---------------------------------------- | ----- |
+| `from_file(path, **overrides)`      | Builds from a named configuration file                 | A `CoWork`                               | no    |
+| `run(prompt)`                       | `submit`, then `wait`, then `collect`                  | A `SessionDocument`                      | yes   |
+| `submit(prompt)`                    | Steps 1 to 7 of the sequence                           | The attributed session directory         | yes   |
+| `wait(session_dir)`                 | Step 8, the completion signal                          | The same directory                       | no    |
+| `collect(session_dir, prompt=None)` | Step 9, reading one session already on disk            | A `SessionDocument`                      | no    |
+| `sessions(root=None)`               | Every session directory under a root                   | Paths, sorted                            | no    |
+| `history(run_log=None)`             | The run log                                            | One `RunLogEntry` per line, oldest first | no    |
+| `deep_link(prompt)`                 | Builds the URL, percent-encoding the prompt            | The URL                                  | no    |
+| `recent()`                          | Submissions in the trailing 24 hours, from the run log | A count                                  | no    |
 
 Rules that hold for all of them:
 
@@ -91,8 +91,11 @@ Rules that hold for all of them:
   `tests/README.md`.
 - `collect` takes `prompt` when the caller knows what was submitted, which fills `prompt`
   and `prompt_sha256`. Without it those two come from the audit record.
-- Every public callable is fully type hinted, and the session document is JSON-serializable:
-  dictionaries, lists, strings, numbers and `None`, with every path a string.
+- Every public callable is fully type hinted. `run` and `collect` return a `SessionDocument`,
+  a pydantic model serialised with `model_dump_json()`. It carries exactly the keys
+  [cowork_driver.md](cowork_driver.md) lists, every path is a string, and a field with no
+  value is written as null. `history` returns one `RunLogEntry` per run log line, oldest
+  first.
 
 Five methods fire nothing and need no authorization beyond read access to the profile:
 `collect`, `sessions`, `history`, `recent` and `deep_link`. `collect` runs over a recorded
@@ -231,8 +234,9 @@ Rules the reader follows. The record shapes they act on are in
 - The run is the newest top level transcript by modification time under
   `.claude/projects/session/`. Files under `subagents/` are recorded by path and are never
   merged into it.
-- An unparsable line is skipped. Both `audit.jsonl` and the transcript are appended while
-  the run is live, so the last line can be partial.
+- An unparsable line, or one that does not validate as its record, is skipped. Both
+  `audit.jsonl` and the transcript are appended while the run is live, so the last line can
+  be partial. The run log is read by the same rule.
 - Both forms `message.content` takes are read for turn text.
 - A `tool_result` is paired to its `tool_use` by id, never by position: results arrive in
   later records, and parallel calls interleave.

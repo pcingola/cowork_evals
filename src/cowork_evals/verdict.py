@@ -26,42 +26,16 @@ them, and turns `passed` into an exit code. [cli.py](cli.py).
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+from pydantic import ValidationError
 
 from .checks import ADVISORY_TYPE
 from .config import ABLATION_WITH_WITHOUT
+from .grader import GraderResult
 from .harness import RESULT_NAME
-from .results import ARM_WITH, ARM_WITHOUT, DECLARED_UNRUNNABLE
-from .traces import DENIED, UNOFFERED
-
-# The one schema this module reads. The contract is additive-only, so an unknown field is
-# ignored and a different version is a failure.
-# docs/claude_code/plugin_eval_reference.md.
-SCHEMA_VERSION = 1
-
-# What the document says the run was. Every condition but the delta reads the with-arm, on
-# one arm and on two. docs/running_evals.md.
-SUITE = "suite"
-ABLATION = "ablation"
-
-# The case aggregate the delta is read from, and the two fields beside it a failing line
-# names. The document works the delta out and this module never re-derives one.
-# docs/running_evals.md.
-AGGREGATES = "aggregates"
-DELTA = "delta"
-SCORE = "score"
-SCORE_WITHOUT = "scoreWithout"
-
-# The document's own mean of the case deltas, on the summary line.
-MEAN_DELTA = "meanDelta"
-
-# The run field that says a run was graded under different rules from the arm it is compared
-# with. It is one of the two reasons a two-arm case carries no delta, and the other is a
-# baseline arm that ran nothing. docs/running_evals.md.
-SKIPPED_PAID = "skippedPaidGraders"
+from .results import CaseEntry, ResultDocument, RunEntry, WrongSchema
 
 # The two tags every line carries, so a note is never read as the cause of exit 1. A note is a
 # failed advisory check or a with-only indicator that did not fire, and nothing else.
@@ -80,13 +54,11 @@ OUTCOME_DECLARED = "declared"
 # docs/running_evals.md; the container backend fills it through traces.py.
 ARTIFACTS = "artifacts"
 
-# The two validity fields traces.py writes, and what a run carrying each is told. Both say
+# What a run carrying each of the two validity fields traces.py writes is told. Both say
 # the model never had a tool the case was granted, so the score is not a fact about the
 # plugin. docs/running_evals.md.
-VALIDITY = {
-    DENIED: "the permission mode refused",
-    UNOFFERED: "the run was never offered",
-}
+DENIED_SAYS = "the permission mode refused"
+UNOFFERED_SAYS = "the run was never offered"
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,59 +134,62 @@ def decide(
     )
 
 
-def two_arm(document: dict[str, Any]) -> bool:
+def two_arm(document: ResultDocument) -> bool:
     """Whether the run that wrote this document ran a baseline arm.
 
     It is the suite's own record of the flag and not a count of the arms a case carries: a
     case of a two-arm run whose baseline arm ran nothing carries one arm and is a failure,
     not a one-arm case. docs/running_evals.md.
     """
-    suite = document.get(SUITE)
-    values = suite if isinstance(suite, dict) else {}
-    return values.get(ABLATION) == ABLATION_WITH_WITHOUT
+    return document.suite.ablation == ABLATION_WITH_WITHOUT
 
 
 # Reading one document.
 
 
-def _read(path: Path) -> tuple[dict[str, Any], None] | tuple[dict[str, Any], str]:
-    """The document, or the one line that says why no verdict can be reached on it."""
+def _read(path: Path) -> tuple[ResultDocument, None] | tuple[None, str]:
+    """The document, or the one line that says why no verdict can be reached on it.
+
+    The contract is additive-only, so an unknown field is ignored, and a document of another
+    `schemaVersion` is reported on its version and never on a field it does not have.
+    docs/claude_code/plugin_eval_reference.md.
+    """
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
     except OSError:
-        return {}, f"{path}: no result document"
-    except ValueError as error:
-        return {}, f"{path}: unparsable result document: {error}"
-    if not isinstance(document, dict):
-        return {}, f"{path}: expected a mapping at the top level"
-    version = document.get("schemaVersion")
-    if version != SCHEMA_VERSION:
-        return {}, f"{path}: schemaVersion is {version!r}, and this module reads {SCHEMA_VERSION}"
-    return document, None
+        return None, f"{path}: no result document"
+    try:
+        return ResultDocument.model_validate_json(text), None
+    except ValidationError as error:
+        for detail in error.errors():
+            wrong = (detail.get("ctx") or {}).get("error")
+            if isinstance(wrong, WrongSchema):
+                return None, f"{path}: {wrong}"
+        return None, f"{path}: unparsable result document: {error}"
 
 
 def _judge_document(
     plugin: str,
-    document: dict[str, Any],
+    document: ResultDocument,
     failures: list[str],
     notes: list[str],
     outcomes: list[CaseOutcome],
     totals: _Totals,
     delta_threshold: float,
 ) -> None:
-    if document.get("partial"):
-        reason = document.get("partialReason")
+    if document.partial:
+        reason = document.partial_reason
         failures.append(f"{FAIL} {plugin}: partial results: {reason}")
         totals.stopped(reason)
     arms = two_arm(document)
     totals.arms(document, arms)
-    for case in document.get("cases") or []:
+    for case in document.cases:
         outcomes.append(_judge_case(plugin, case, failures, notes, totals, arms, delta_threshold))
 
 
 def _judge_case(
     plugin: str,
-    case: dict[str, Any],
+    case: CaseEntry,
     failures: list[str],
     notes: list[str],
     totals: _Totals,
@@ -232,19 +207,15 @@ def _judge_case(
     of the backend's own `casesTotal` as well, so it is on the summary line and nowhere else.
     """
     before = len(failures)
-    where = f"{plugin}/{case.get('name')}"
-    if case.get(DECLARED_UNRUNNABLE):
+    where = f"{plugin}/{case.name}"
+    if case.declared_unrunnable:
         totals.declare_one()
         return _outcome(plugin, case, OUTCOME_DECLARED)
-    if case.get("skipped"):
-        failures.append(f"{FAIL} {where}: the case was skipped: {case.get('skipReason')}")
+    if case.skipped:
+        failures.append(f"{FAIL} {where}: the case was skipped: {case.skip_reason}")
         return _outcome(plugin, case, OUTCOME_FAIL)
-    definitions = {
-        definition.get("name"): definition.get("type")
-        for definition in case.get("graders") or []
-        if isinstance(definition, dict)
-    }
-    for index, run in enumerate(case.get("arms", {}).get(ARM_WITH) or [], start=1):
+    definitions = {definition.name: definition.type for definition in case.graders}
+    for index, run in enumerate(case.arms.with_, start=1):
         _judge_run(f"{where}: run {index}", run, definitions, failures, notes, arms)
     if arms:
         _judge_delta(where, case, failures, delta_threshold)
@@ -254,19 +225,12 @@ def _judge_case(
     return _outcome(plugin, case, OUTCOME_FAIL)
 
 
-def _outcome(plugin: str, case: dict[str, Any], outcome: str) -> CaseOutcome:
+def _outcome(plugin: str, case: CaseEntry, outcome: str) -> CaseOutcome:
     """The conclusion above, carrying the pair that identifies the case it is about."""
-    return CaseOutcome(
-        plugin=plugin,
-        dir=str(case.get("dir") or ""),
-        name=str(case.get("name") or ""),
-        outcome=outcome,
-    )
+    return CaseOutcome(plugin=plugin, dir=case.dir, name=case.name, outcome=outcome)
 
 
-def _judge_delta(
-    where: str, case: dict[str, Any], failures: list[str], delta_threshold: float
-) -> None:
+def _judge_delta(where: str, case: CaseEntry, failures: list[str], delta_threshold: float) -> None:
     """What the plugin changed, on one case of a two-arm run.
 
     The delta is `score - scoreWithout` and the document works it out, so this reads it and
@@ -277,51 +241,45 @@ def _judge_delta(
     delta did not do what the invocation asked, and passing it would be the green-on-nothing
     the arm exists to remove.
     """
-    aggregates = case.get(AGGREGATES)
-    values = aggregates if isinstance(aggregates, dict) else {}
-    delta = values.get(DELTA)
-    if not isinstance(delta, int | float) or isinstance(delta, bool):
+    aggregates = case.aggregates
+    delta = aggregates.delta
+    if delta is None:
         failures.append(f"{FAIL} {where}: {_incomparable(case)}")
         return
     if delta < delta_threshold:
         failures.append(
             f"{FAIL} {where}: the delta is {delta:+.2f}, "
-            f"with {_number(values.get(SCORE))} and without {_number(values.get(SCORE_WITHOUT))}, "
+            f"with {_number(aggregates.score)} and without {_number(aggregates.score_without)}, "
             f"and eval.delta_threshold is {delta_threshold}"
         )
 
 
-def _incomparable(case: dict[str, Any]) -> str:
+def _incomparable(case: CaseEntry) -> str:
     """Why a two-arm case carries no delta. The document tells the two reasons apart.
 
     A baseline arm that ran nothing is one, and a run graded under different rules from the
     arm it is compared with is the other. The failure is the same either way, so the reason
     is what the line says and nothing else turns on it. docs/running_evals.md.
     """
-    arms = case.get("arms") or {}
-    if not arms.get(ARM_WITHOUT):
+    if not case.arms.without:
         return "the arms are not comparable: the baseline arm ran nothing"
-    for runs in arms.values():
-        for run in runs or []:
-            if isinstance(run, dict) and run.get(SKIPPED_PAID):
-                return (
-                    "the arms are not comparable: a run skipped its paid graders "
-                    "at the cost ceiling"
-                )
+    for run in [*case.arms.with_, *case.arms.without]:
+        if run.skipped_paid_graders:
+            return "the arms are not comparable: a run skipped its paid graders at the cost ceiling"
     return "the arms are not comparable, and the document does not say why"
 
 
-def _number(value: Any) -> str:
+def _number(value: float | None) -> str:
     """One of the two scores a delta line names, or what the document carries instead."""
-    if isinstance(value, int | float) and not isinstance(value, bool):
-        return f"{value:.2f}"
-    return "no score"
+    if value is None:
+        return "no score"
+    return f"{value:.2f}"
 
 
 def _judge_run(
     where: str,
-    run: dict[str, Any],
-    definitions: dict[Any, Any],
+    run: RunEntry,
+    definitions: dict[str, str],
     failures: list[str],
     notes: list[str],
     arms: bool = False,
@@ -339,24 +297,22 @@ def _judge_run(
     Neither field appears on a CoWork run or on a run that kept no trace.
     """
     kept = artifacts(run)
-    error = run.get("error")
-    if error:
-        failures.append(f"{FAIL} {where}: {error}{kept}")
-    for field, what in VALIDITY.items():
-        named = run.get(field)
+    if run.error:
+        failures.append(f"{FAIL} {where}: {run.error}{kept}")
+    for what, named in ((DENIED_SAYS, run.denied_tools), (UNOFFERED_SAYS, run.unoffered_tools)):
         if named:
-            tools = ", ".join(str(tool) for tool in named)
+            tools = ", ".join(named)
             failures.append(
                 f"{FAIL} {where}: {what} {tools}, so the score is not a fact about the plugin{kept}"
             )
-    for result in run.get("graders") or []:
+    for result in run.graders:
         _judge_grader(where, result, definitions, failures, notes, kept, arms)
 
 
 def _judge_grader(
     where: str,
-    result: dict[str, Any],
-    definitions: dict[Any, Any],
+    result: GraderResult,
+    definitions: dict[str, str],
     failures: list[str],
     notes: list[str],
     kept: str = "",
@@ -378,32 +334,31 @@ def _judge_grader(
     are all with-only is the harness's own exception and arrives carrying `scored: true`,
     which this reads rather than re-deriving. docs/running_evals.md.
     """
-    name = result.get("name")
+    name = result.name
     at = f"{where}: {name}"
     if name not in definitions:
         failures.append(f"{FAIL} {at}: no grader of that name is defined in the case")
         return
-    if result.get("skipped"):
-        failures.append(f"{FAIL} {at}: the grader was skipped: {result.get('skipReason')}")
+    if result.skipped:
+        failures.append(f"{FAIL} {at}: the grader was skipped: {result.skip_reason}")
         return
     if definitions[name] == ADVISORY_TYPE:
-        if not result.get("passed"):
-            said = result.get("explanation")
-            notes.append(f"{NOTE} {at}: the advisory check failed: {said}{kept}")
+        if not result.passed:
+            notes.append(f"{NOTE} {at}: the advisory check failed: {result.explanation}{kept}")
         return
-    if not result.get("scored", True):
+    if not result.scored:
         if not arms:
             failures.append(f"{FAIL} {at}: not scored, and --ablation none drops no grader")
-        elif not result.get("passed"):
+        elif not result.passed:
             notes.append(f"{NOTE} {at}: the with-only indicator did not fire{kept}")
         return
-    if result.get("passed"):
+    if result.passed:
         return
     kind = definitions[name]
-    failures.append(f"{FAIL} {at}: the {kind} grader failed: {result.get('explanation')}{kept}")
+    failures.append(f"{FAIL} {at}: the {kind} grader failed: {result.explanation}{kept}")
 
 
-def artifacts(run: dict[str, Any]) -> str:
+def artifacts(run: RunEntry) -> str:
     """What one run left on the host, as the suffix a failure line carries.
 
     `tracePath` is where the trace is, and every other artefact of that run sits beside it,
@@ -414,10 +369,9 @@ def artifacts(run: dict[str, Any]) -> str:
     Empty when there is no such directory, which is a run whose trace was not collected and
     a document written before this was built. It never names a path that is not there.
     """
-    named = run.get("tracePath")
-    if not isinstance(named, str) or not named:
+    if not run.trace_path:
         return ""
-    directory = Path(named).parent
+    directory = Path(run.trace_path).parent
     if not directory.is_dir():
         return ""
     return f" [{ARTIFACTS}: {display(directory)}]"
@@ -476,12 +430,11 @@ class _Totals:
         self.two_arm = False
         self.reasons: list[str] = []
 
-    def add(self, document: dict[str, Any]) -> None:
-        aggregates = document.get("aggregates") or {}
-        self.ran += int(aggregates.get("casesTotal") or 0)
-        self.scores.append(float(aggregates.get("overallScore") or 0.0))
+    def add(self, document: ResultDocument) -> None:
+        self.ran += document.aggregates.cases_total
+        self.scores.append(document.aggregates.overall_score)
 
-    def arms(self, document: dict[str, Any], two: bool) -> None:
+    def arms(self, document: ResultDocument, two: bool) -> None:
         """What the document says about the baseline arm, and the mean delta it carries.
 
         `meanDelta` is the document's own mean of the case deltas that are defined, and is
@@ -489,10 +442,9 @@ class _Totals:
         one, exactly as the score is.
         """
         self.two_arm = self.two_arm or two
-        aggregates = document.get(AGGREGATES) or {}
-        mean = aggregates.get(MEAN_DELTA)
-        if isinstance(mean, int | float) and not isinstance(mean, bool):
-            self.deltas.append(float(mean))
+        mean = document.aggregates.mean_delta
+        if mean is not None:
+            self.deltas.append(mean)
 
     def pass_one(self) -> None:
         self.passed += 1
@@ -500,7 +452,7 @@ class _Totals:
     def declare_one(self) -> None:
         self.declared += 1
 
-    def stopped(self, reason: Any) -> None:
+    def stopped(self, reason: str | None) -> None:
         """Why a document says the sweep stopped early, once per distinct reason."""
         said = str(reason)
         if said not in self.reasons:

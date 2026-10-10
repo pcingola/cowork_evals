@@ -31,9 +31,9 @@ CREDENTIAL = (Condition.CREDENTIAL, Condition.BEDROCK)
 
 docker = Docker()
 unmet = [
-    message
-    for condition, message in docker.check()
-    if condition not in CREDENTIAL
+    line.message
+    for line in docker.check()
+    if line.condition not in CREDENTIAL
 ]
 for message in unmet:
     print(f"FAIL: {message}", file=sys.stderr)

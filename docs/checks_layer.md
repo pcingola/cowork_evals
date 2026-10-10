@@ -14,7 +14,7 @@ the changes, and nothing else in the document moves.
 
 | Where                       | What                                                                  |
 | --------------------------- | --------------------------------------------------------------------- |
-| the case's `graders[]`      | one definition per check, `{name, type: check, weight: 1, config: {}}` |
+| the case's `graders[]`      | one definition per check, `{name, type: check, weight: 1, config: {}}`, and `type: check-advisory` for an advisory check |
 | the run's `graders[]`       | one result per check, in the shape every grader result has            |
 | the run's `score`, `passed` | recomputed over every scored result, the checks included              |
 | the case's `aggregates`     | `score` and `passRate`, and on two arms `scoreWithout`, `passRateWithout` and `delta` where the harness wrote them, recomputed over the runs |
@@ -24,7 +24,8 @@ the changes, and nothing else in the document moves.
 
 `casesTotal` and `casesPassed` are untouched. `--threshold` is pinned to 0, so every case counts
 as passed there whatever a check said, and the verdict decides pass and fail. A suite with no
-check anywhere leaves the document exactly as the backend wrote it.
+check anywhere leaves the document exactly as the backend wrote it. A document that is missing,
+or that does not parse as a result document, gives no warning and is left unchanged.
 
 Every arm a case carries is walked. `scoreWithout`, `passRateWithout`, `delta` and `meanDelta`
 are recomputed only where the harness wrote them, so a case the harness found not comparable

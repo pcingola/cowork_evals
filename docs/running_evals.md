@@ -264,8 +264,11 @@ logs/evals/latest                # symlink to the newest directory
 logs/evals/history/              # one record per case, read by panel
 ```
 
-`env.txt` names forwarded variables, never their values. `<n>` starts at 1 and is the number
-the verdict prints as `run N`. A second case of the same name in one plugin is suffixed `-2`,
+`env.txt` names forwarded variables, never their values. Its `image` line is written on
+`--docker` only. On `--docker` it also carries a `session_env` and a `keep_env` line, each the
+names of that list space-joined, and neither line when the list is empty.
+
+`<n>` starts at 1 and is the number the verdict prints as `run N`. A second case of the same name in one plugin is suffixed `-2`,
 as is a second plugin of one name. Under `--ablation with-without`, the baseline arm's runs are
 under `traces/<case>/without/run-<n>/`, so `traces/<case>/run-*` is the with-arm alone.
 

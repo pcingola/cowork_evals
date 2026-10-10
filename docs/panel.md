@@ -93,7 +93,8 @@ directories does not touch it. Two plugins whose manifests carry the same `name`
 history directory.
 
 One JSON object per line. An optional field is absent, never null. A line of another
-`schemaVersion` is reported and not read. A line that does not parse is reported and skipped.
+`schemaVersion` is reported and not read. A line that does not parse, or is not a record, is
+reported and skipped.
 The newest record for a backend is the last one for it in the file.
 
 | Field                           | Is                                                          |
@@ -128,8 +129,8 @@ A record repeats the plugin, skill and case its path says, so one line reads alo
 `prune --history --older-than DAYS` drops records older than `DAYS`, then deletes files left
 with no record and directories left empty. It reads `panel.root` and ignores `--out`. `DAYS` is
 an exact moment `DAYS` before now, as for run directories. The age is the record's own stamp,
-never the file's modification time. A record with no stamp, and a line that does not parse, are
-kept.
+never the file's modification time. A record with no stamp, and a line that is not a record,
+are kept.
 
 Nothing is deleted automatically. `prune` takes no path and does not remove the history of a
 case that left the tree. To retire one case's history, delete its one file. `panel --removed`

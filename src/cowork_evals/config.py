@@ -459,6 +459,28 @@ class Config:
             panel=_section(document, source, PanelSection),
         )
 
+    def dump(self, path: Path | str) -> None:
+        """Write this configuration as a file `load` reads back to an equal `Config`.
+
+        Each section is under its key with every field: a `Path` as a string, a tuple as a
+        list and `None` as null.
+        """
+        sections = (self.cowork, self.eval, self.docker, self.panel)
+        document = {
+            section._NAME: {key: _plain(getattr(section, key)) for key in section._FIELDS}
+            for section in sections
+        }
+        Path(path).write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+
+def _plain(value: Any) -> Any:
+    """One field as YAML writes it."""
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, tuple):
+        return list(value)
+    return value
+
 
 # A section field of `Config` is named for its section key, so a new section is one
 # dataclass and one line in `Config`.

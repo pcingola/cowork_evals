@@ -16,8 +16,19 @@ import time
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import quote, urlencode
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    field_serializer,
+    model_serializer,
+    model_validator,
+)
 
 from .config import (
     CONSENT_NONE,
@@ -114,6 +125,157 @@ _CONSENTED = False
 POLL_SECONDS = 1.0
 
 
+# The records the driver reads. Their shapes are docs/cowork_desktop.md. A record carries keys
+# nothing here reads, and ignores them. A content block keeps them, because a tool result is
+# written into the session document as the transcript holds it.
+
+
+class ContentBlock(BaseModel):
+    """One block of `message.content`, and one block of a `tool_result`'s content.
+
+    It keeps the keys it does not name, and writes none of its fields that is `None`, so a
+    tool result reaches `ToolCall.result` with the keys and values the transcript holds.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    text: str | None = None
+    thinking: str | None = None
+    id: str | None = None
+    name: str | None = None
+    input: dict[str, Any] | None = None
+    tool_use_id: str | None = None
+    content: str | list[ContentBlock] | None = None
+
+    @model_serializer(mode="wrap")
+    def _present(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        return {key: value for key, value in handler(self).items() if value is not None}
+
+
+class Message(BaseModel):
+    """The `message` of a transcript or audit record. `content` takes both of its forms."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    role: str | None = None
+    content: str | list[ContentBlock]
+
+    def blocks(self) -> list[ContentBlock]:
+        """The content as a list of blocks: a string is one text block."""
+        if isinstance(self.content, str):
+            return [ContentBlock(type="text", text=self.content)]
+        return self.content
+
+
+class SessionRecord(BaseModel):
+    """One line of a session transcript."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    type: str
+    uuid: str | None = None
+    timestamp: str | None = None
+    message: Message | None = None
+    attribution_mcp_server: str | None = Field(default=None, alias="attributionMcpServer")
+    attribution_mcp_tool: str | None = Field(default=None, alias="attributionMcpTool")
+
+
+class AuditRecord(BaseModel):
+    """One line of `audit.jsonl`."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    type: str
+    uuid: str | None = None
+    timestamp: str | None = None
+    message: Message | None = None
+    state: str | None = None
+
+
+# What the driver returns. Every key is written, and a field that is `None` is written as null,
+# because docs/cowork_driver.md lists every key the session document carries.
+
+
+class Turn(BaseModel):
+    """Role and text of one turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str
+    text: str
+
+
+class ToolCall(BaseModel):
+    """One `tool_use`, with the content of the `tool_result` paired to it by id."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None
+    name: str
+    input: dict[str, Any]
+    mcp_server: str | None
+    mcp_tool: str | None
+    timestamp: str | None
+    result: str | list[ContentBlock] | None
+
+
+class SessionDocument(BaseModel):
+    """What `collect` and `run` return. docs/cowork_driver.md lists every key."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str | None
+    prompt_sha256: str | None
+    session_dir: str
+    submitted_at: str | None
+    collected_at: str
+    transcript: str | None
+    other_transcripts: list[str]
+    subagent_transcripts: list[str]
+    audit_prompt: str | None
+    lifecycle: list[str]
+    turns: list[Turn]
+    tool_calls: list[ToolCall]
+    tool_names: list[str]
+    final_text: str
+    outputs: list[str]
+    log_file: str | None
+
+    @model_validator(mode="after")
+    def _names(self) -> SessionDocument:
+        named = [call.name for call in self.tool_calls]
+        if self.tool_names != named:
+            raise ValueError(f"tool_names is {self.tool_names}, and tool_calls names {named}")
+        return self
+
+
+class RunLogEntry(BaseModel):
+    """One line of the run log. `session_dir` is written as null when none is known."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: datetime
+    prompt_sha256: str
+    session_dir: str | None
+    outcome: str
+
+    @field_serializer("timestamp")
+    def _iso(self, value: datetime) -> str:
+        # `isoformat`, so UTC is written `+00:00` and not pydantic's `Z`.
+        return value.isoformat()
+
+    @property
+    def utc(self) -> datetime:
+        """The timestamp, read as UTC when the line carries no offset."""
+        stamp = self.timestamp
+        return stamp if stamp.tzinfo is not None else stamp.replace(tzinfo=timezone.utc)
+
+
+# What `_read_jsonl` parses one line into.
+Record = TypeVar("Record", bound=BaseModel)
+
+
 class CoWork:
     """The driver. One instance holds one resolved configuration."""
 
@@ -141,17 +303,17 @@ class CoWork:
             return []
         return sorted(d for d in base.glob(SESSION_GLOB) if d.is_dir() and (d / AUDIT).is_file())
 
-    def history(self, run_log: Path | None = None) -> list[dict[str, Any]]:
-        """The run log as one dictionary per line, oldest first."""
+    def history(self, run_log: Path | None = None) -> list[RunLogEntry]:
+        """The run log as one `RunLogEntry` per line, oldest first."""
         path = Path(run_log) if run_log is not None else self._config.run_log
-        return _read_jsonl(path)
+        return _read_jsonl(path, RunLogEntry)
 
-    def collect(self, session_dir: Path | str, *, prompt: str | None = None) -> dict[str, Any]:
+    def collect(self, session_dir: Path | str, *, prompt: str | None = None) -> SessionDocument:
         """Build the session document from one session directory already on disk."""
         directory = Path(session_dir)
-        audit = _read_jsonl(directory / AUDIT)
+        audit = _read_jsonl(directory / AUDIT, AuditRecord)
         transcript, other, subagents = _transcripts(directory)
-        records = _read_jsonl(transcript) if transcript is not None else []
+        records = _read_jsonl(transcript, SessionRecord) if transcript is not None else []
 
         turns = _turns(records)
         final_text = _final_text(turns)
@@ -161,24 +323,24 @@ class CoWork:
         audit_prompt = _audit_prompt(audit)
         submitted = prompt if prompt is not None else audit_prompt
         calls = _tool_calls(records)
-        return {
-            "prompt": submitted,
-            "prompt_sha256": _digest(submitted),
-            "session_dir": str(directory),
-            "submitted_at": _submitted_at(audit),
-            "collected_at": _now(),
-            "transcript": None if transcript is None else str(transcript),
-            "other_transcripts": [str(path) for path in other],
-            "subagent_transcripts": [str(path) for path in subagents],
-            "audit_prompt": audit_prompt,
-            "lifecycle": _lifecycle(audit),
-            "turns": turns,
-            "tool_calls": calls,
-            "tool_names": [call["name"] for call in calls],
-            "final_text": final_text,
-            "outputs": _outputs(directory),
-            "log_file": None if self._log_file is None else str(self._log_file),
-        }
+        return SessionDocument(
+            prompt=submitted,
+            prompt_sha256=_digest(submitted),
+            session_dir=str(directory),
+            submitted_at=_submitted_at(audit),
+            collected_at=_now(),
+            transcript=None if transcript is None else str(transcript),
+            other_transcripts=[str(path) for path in other],
+            subagent_transcripts=[str(path) for path in subagents],
+            audit_prompt=audit_prompt,
+            lifecycle=_lifecycle(audit),
+            turns=turns,
+            tool_calls=calls,
+            tool_names=[call.name for call in calls],
+            final_text=final_text,
+            outputs=_outputs(directory),
+            log_file=None if self._log_file is None else str(self._log_file),
+        )
 
     # Firing. The nine steps and the code each failure produces are in
     # docs/cowork_driver.md.
@@ -190,7 +352,7 @@ class CoWork:
             query["surface"] = self._config.surface
         return f"{DEEP_LINK}?{urlencode(query, quote_via=quote, safe='')}"
 
-    def run(self, prompt: str) -> dict[str, Any]:
+    def run(self, prompt: str) -> SessionDocument:
         """Submit, wait for the run to finish, and collect the session document."""
         with self._diagnostics():
             session_dir = self._submit(prompt)
@@ -317,7 +479,7 @@ class CoWork:
         """
         deadline = time.monotonic() + self._config.session_timeout
         while True:
-            recorded = _audit_prompt(_read_jsonl(session_dir / AUDIT))
+            recorded = _audit_prompt(_read_jsonl(session_dir / AUDIT, AuditRecord))
             if recorded is not None:
                 if recorded != prompt:
                     raise CoWorkError(
@@ -347,7 +509,7 @@ class CoWork:
         signature: object = None
         idle_since = time.monotonic()
         while True:
-            audit = _read_jsonl(session_dir / AUDIT)
+            audit = _read_jsonl(session_dir / AUDIT, AuditRecord)
             if TERMINAL_STATE in _lifecycle(audit):
                 LOGGER.info("the completion signal fired: lifecycle state %s", TERMINAL_STATE)
                 return session_dir
@@ -405,26 +567,22 @@ class CoWork:
         rather than re-deriving the window over `history()`.
         """
         cutoff = datetime.now(timezone.utc) - CEILING_WINDOW
-        count = 0
-        for entry in self.history():
-            stamp = _parse_timestamp(entry.get("timestamp"))
-            if stamp is not None and stamp >= cutoff:
-                count += 1
-        return count
+        return sum(1 for entry in self.history() if entry.utc >= cutoff)
 
     def _record(self, prompt: str, session_dir: Path | None, outcome: str) -> None:
         """Append one line to the run log. A failed submission is logged too."""
-        entry = {
-            "timestamp": _now(),
-            "prompt_sha256": _digest(prompt),
-            "session_dir": None if session_dir is None else str(session_dir),
-            "outcome": outcome,
-        }
+        entry = RunLogEntry(
+            timestamp=datetime.now(timezone.utc),
+            prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+            session_dir=None if session_dir is None else str(session_dir),
+            outcome=outcome,
+        )
+        written = entry.model_dump(mode="json")
         path = self._config.run_log
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry) + "\n")
-        LOGGER.info("run log: %s", entry)
+            handle.write(json.dumps(written) + "\n")
+        LOGGER.info("run log: %s", written)
 
     @contextlib.contextmanager
     def _diagnostics(self) -> Iterator[Path | None]:
@@ -516,13 +674,14 @@ def frontmost() -> str:
 # Readers. Each takes what it reads, so a test drives it over a fixture directory.
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    """Parse a JSON Lines file, dropping a line that does not parse.
+def _read_jsonl(path: Path, model: type[Record]) -> list[Record]:
+    """Parse a JSON Lines file into one record per line, dropping a line that does not parse.
 
     Both audit.jsonl and the transcript are appended while the run is live, and this is
     called on both while a run is in flight, so a read can catch a partial last line. That
     truncated tail is the only unparsable line with a known cause. A line that does not
-    parse anywhere else has none, and is dropped rather than trusted.
+    parse, or does not validate as the record, has none anywhere else, and is dropped rather
+    than trusted.
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -534,11 +693,9 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
         if not line:
             continue
         try:
-            record = json.loads(line)
-        except ValueError:
+            records.append(model.model_validate_json(line))
+        except ValidationError:
             continue
-        if isinstance(record, dict):
-            records.append(record)
     return records
 
 
@@ -559,43 +716,32 @@ def _transcripts(session_dir: Path) -> tuple[Path | None, list[Path], list[Path]
     return main, [path for path in top if path != main], subagents
 
 
-def _content_blocks(record: dict[str, Any]) -> list[dict[str, Any]]:
-    """The content of a transcript record, always as a list of blocks."""
-    message = record.get("message")
-    if not isinstance(message, dict):
-        return []
-    content = message.get("content")
-    if isinstance(content, str):
-        return [{"type": "text", "text": content}]
-    if isinstance(content, list):
-        return [block for block in content if isinstance(block, dict)]
-    return []
+def _content_blocks(record: SessionRecord | AuditRecord) -> list[ContentBlock]:
+    """The content of a record, always as a list of blocks."""
+    return [] if record.message is None else record.message.blocks()
 
 
-def _text_of(record: dict[str, Any]) -> str:
+def _text_of(record: SessionRecord | AuditRecord) -> str:
     """The turn text of a record. A thinking block is not turn text."""
     parts = [
-        block.get("text", "")
+        block.text
         for block in _content_blocks(record)
-        if block.get("type") == "text" and isinstance(block.get("text"), str)
+        if block.type == "text" and block.text is not None
     ]
     return "\n".join(part for part in parts if part)
 
 
-def _turns(records: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _turns(records: list[SessionRecord]) -> list[Turn]:
     """Role and text per turn. Only user and assistant records carry a message."""
     turns = []
     for record in records:
-        if record.get("type") not in ("user", "assistant"):
+        if record.type not in ("user", "assistant"):
             continue
-        message = record.get("message")
-        role = message.get("role") if isinstance(message, dict) else None
         text = _text_of(record)
         if not text:
             continue
-        if not isinstance(role, str):
-            role = str(record.get("type"))
-        turns.append({"role": role, "text": text})
+        role = record.message.role if record.message is not None else None
+        turns.append(Turn(role=role if role is not None else record.type, text=text))
     return turns
 
 
@@ -610,82 +756,77 @@ def final_text(transcript: Path | str) -> str | None:
     `None` when the transcript is absent, unreadable as JSON lines, or carries no assistant
     text. Nothing here writes anywhere under the CoWork profile.
     """
-    return _final_text(_turns(_read_jsonl(Path(transcript))))
+    return _final_text(_turns(_read_jsonl(Path(transcript), SessionRecord)))
 
 
-def _final_text(turns: list[dict[str, str]]) -> str | None:
+def _final_text(turns: list[Turn]) -> str | None:
     for turn in reversed(turns):
-        if turn["role"] == "assistant":
-            return turn["text"]
+        if turn.role == "assistant":
+            return turn.text
     return None
 
 
-def _tool_calls(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _tool_calls(records: list[SessionRecord]) -> list[ToolCall]:
     """Every tool_use, paired to its tool_result by tool_use_id.
 
     A result whose call is absent from this transcript belongs to a subagent and is
     dropped. Positional pairing is wrong: results arrive in later records, and parallel
     calls interleave.
     """
-    calls: list[dict[str, Any]] = []
-    index: dict[str, dict[str, Any]] = {}
+    results: dict[str, str | list[ContentBlock] | None] = {}
     for record in records:
         for block in _content_blocks(record):
-            if block.get("type") != "tool_use":
-                continue
-            call = {
-                "id": block.get("id"),
-                "name": block.get("name"),
-                "input": block.get("input"),
-                "mcp_server": record.get("attributionMcpServer"),
-                "mcp_tool": record.get("attributionMcpTool"),
-                "timestamp": record.get("timestamp"),
-                "result": None,
-            }
-            calls.append(call)
-            if isinstance(block.get("id"), str):
-                index[block["id"]] = call
+            if block.type == "tool_result" and block.tool_use_id is not None:
+                results[block.tool_use_id] = block.content
 
+    calls = []
     for record in records:
         for block in _content_blocks(record):
-            if block.get("type") != "tool_result":
+            if block.type != "tool_use":
                 continue
-            call = index.get(block.get("tool_use_id"))
-            if call is not None:
-                call["result"] = block.get("content")
+            calls.append(
+                ToolCall(
+                    id=block.id,
+                    name=block.name or "",
+                    input=block.input if block.input is not None else {},
+                    mcp_server=record.attribution_mcp_server,
+                    mcp_tool=record.attribution_mcp_tool,
+                    timestamp=record.timestamp,
+                    result=None if block.id is None else results.get(block.id),
+                )
+            )
     return calls
 
 
-def _lifecycle(audit: list[dict[str, Any]]) -> list[str]:
+def _lifecycle(audit: list[AuditRecord]) -> list[str]:
     return [
-        record["state"]
+        record.state
         for record in audit
-        if record.get("type") == "command_lifecycle" and isinstance(record.get("state"), str)
+        if record.type == "command_lifecycle" and record.state is not None
     ]
 
 
-def _first_user(audit: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _first_user(audit: list[AuditRecord]) -> AuditRecord | None:
     """The `user` audit record of the first submission in this session directory.
 
     A session directory can hold more than one command. docs/cowork_desktop.md.
     """
     for record in audit:
-        if record.get("type") == "user":
+        if record.type == "user":
             return record
     return None
 
 
-def _audit_prompt(audit: list[dict[str, Any]]) -> str | None:
+def _audit_prompt(audit: list[AuditRecord]) -> str | None:
     """The submitted prompt as the application recorded it, verbatim."""
     record = _first_user(audit)
     return (_text_of(record) or None) if record is not None else None
 
 
-def _submitted_at(audit: list[dict[str, Any]]) -> str | None:
+def _submitted_at(audit: list[AuditRecord]) -> str | None:
     """When the prompt reached the application, from that same record."""
     record = _first_user(audit)
-    stamp = record.get("timestamp") if record is not None else None
-    return stamp if isinstance(stamp, str) else None
+    return record.timestamp if record is not None else None
 
 
 def _outputs(session_dir: Path) -> list[str]:
@@ -701,14 +842,14 @@ def _digest(prompt: str | None) -> str | None:
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
 
-def _started(audit: list[dict[str, Any]], session_dir: Path) -> bool:
+def _started(audit: list[AuditRecord], session_dir: Path) -> bool:
     """Whether the run has demonstrably started: a started state, or a first assistant turn."""
     if STARTED_STATE in _lifecycle(audit):
         return True
     transcript, _, _ = _transcripts(session_dir)
     if transcript is None:
         return False
-    return any(turn["role"] == "assistant" for turn in _turns(_read_jsonl(transcript)))
+    return any(turn.role == "assistant" for turn in _turns(_read_jsonl(transcript, SessionRecord)))
 
 
 def _signature(session_dir: Path) -> tuple[tuple[str, int, float], ...]:
@@ -726,17 +867,6 @@ def _signature(session_dir: Path) -> tuple[tuple[str, int, float], ...]:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _parse_timestamp(value: Any) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        # `fromisoformat` accepts a `Z` suffix from Python 3.11. This package runs on 3.10.
-        stamp = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
-    except ValueError:
-        return None
-    return stamp if stamp.tzinfo is not None else stamp.replace(tzinfo=timezone.utc)
 
 
 def _log_path(directory: Path) -> Path:

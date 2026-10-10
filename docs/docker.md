@@ -40,6 +40,7 @@ The `docker:` section of `cowork_evals.yaml`. The file, and the ladder over it, 
 | ---------------------- | ------------------------------ | ------------------------------------------------------ |
 | `platform`             | `linux/arm64`                  | The build and run platform. In the image digest        |
 | `claude_code_version`  | `2.1.265`                      | The npm version of the CLI installed. In the digest    |
+| `credential`           | `login`                        | How Claude Code authenticates: `login` mounts the login this package owns, `bedrock` forwards the four Bedrock names from the host |
 | `login_dir`            | `~/.cache/cowork_evals/claude` | Where the login this package owns is kept              |
 | `extra_ca_file`        | none                           | An extra root CA for a host whose network inspects TLS |
 | `env_passthrough`      | empty                          | Host variable names forwarded into the run container   |
@@ -368,8 +369,17 @@ one command per package the rule added, and `parity.py` records its version.
 
 ## Credentials
 
-One route: a login this package owns, mounted. There is no API key route, by the developer's
-decision. A host with no interactive terminal logs in on a host that has one and carries the two
+`docker.credential` selects one of two routes. There is no API key route, by the developer's
+decision.
+
+| Route            | What reaches the container                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `login`, default | A login this package owns, mounted                                                                              |
+| `bedrock`        | `CLAUDE_CODE_USE_BEDROCK`, `AWS_BEARER_TOKEN_BEDROCK`, `ANTHROPIC_BEDROCK_BASE_URL` and `AWS_REGION`, each as `--env`, from the host |
+
+Under `bedrock` a name that is unset or empty on the host fails the preflight with the
+`BEDROCK` condition, and nothing is mounted for a login. The rest of this section is the `login`
+route. A host with no interactive terminal logs in on a host that has one and carries the two
 paths below.
 
 | Host path, under `docker.login_dir` | Holds                                                      |
@@ -454,10 +464,10 @@ docker:
 Two conditions, both in `Docker.check`, so `check --docker` reports them and `run` exits 3 on
 them before anything is created:
 
-| Condition                                                                                    | Because                                                                                                                          |
-| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| A named variable is unset or empty on the host                                               | A missing precondition fails. An empty string is not a value, and a run that forwarded one would look configured and would not be |
-| A named variable is `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` | The container login above is the one route for Claude's own credential, whatever the variable holds                               |
+| Condition                                                                                                                                                                                                 | Because                                                                                                                          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| A named variable is unset or empty on the host                                                                                                                                                            | A missing precondition fails. An empty string is not a value, and a run that forwarded one would look configured and would not be |
+| A named variable is `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`, `AWS_BEARER_TOKEN_BEDROCK`, `ANTHROPIC_BEDROCK_BASE_URL` or `AWS_REGION` | `docker.credential` is the one route for Claude's own credential, whatever the variable holds                                    |
 
 Each line names the variable and never its value. A value is read once, where the preflight
 reads it, and is not read a second time at container start.
@@ -503,7 +513,7 @@ in CoWork, and its case fails in Docker.
 | 2    | `Docker.run` writes the three lists to `keep_env.txt` in the run's log directory, one name per line           |
 | 3    | `run_argv` mounts that file read-only at `/etc/cowork_evals/keep_env.txt`                                      |
 | 4    | Claude Code runs `cowork-env '<command>'` for each `Bash` call and each hook command                           |
-| 5    | `cowork-env` builds `NAME=value` for each listed name with a value and each `EVAL_*` name, and runs `env -i <pairs> /bin/bash -c '<command>'` |
+| 5    | `cowork-env` skips a line that is empty or not a shell name, builds `NAME=value` for each listed name with a value and each `EVAL_*` name, and runs `env -i <pairs> /bin/bash -c '<command>'` |
 
 The prefix goes in managed settings, because the harness strips variables it does not know
 from the CLI it starts, and managed settings still apply inside a run. For the same reason the
@@ -521,7 +531,9 @@ symlink gets no `TZ`.
 
 ### The three lists
 
-A name belongs in exactly one list, by this rule. A name in two lists is refused at load.
+A name belongs in exactly one list, by this rule. A name in two lists is refused at load. A
+name that does not match `[A-Za-z_][A-Za-z0-9_]*` is refused at load, and the message names
+the key that holds it.
 
 | Key               | A name goes here when                                               | Default                                  |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------------------- |
@@ -644,8 +656,8 @@ The second is the one a bare `bwrap` invocation does not reach. Docker masks ent
 `/proc` by default, and the kernel refuses a fresh procfs mount to a process whose own `/proc` is
 covered that way. The harness mounts one, so every sandboxed command fails while
 `bwrap --ro-bind / / --unshare-user --unshare-pid true` still succeeds.
-`tests/integration/test_docker.py` therefore asserts the `--proc` mount as well as the bare
-invocation.
+`tests/integration/test_docker.py` therefore asserts the `--proc` mount and the `/run/shm`
+tmpfs.
 
 The image also replaces `/run/shm` with a real directory. Jammy ships it as a symlink to
 `/dev/shm`, and bubblewrap mounts a tmpfs there: the symlink resolves against a new root whose

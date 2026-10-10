@@ -3,18 +3,21 @@
 Tests for this repository's own code. Python 3.10 under `.venv`, run by `scripts/test.sh`.
 Scope as each piece is built: the environments, the configuration file, the harness
 argument list, the container image and its parity probe, the test image over it, the CoWork
-driver, the CLI's option surface and backend mapping, the pass and fail decision, the case validator,
-the CoWork grader and the panel over the case history. The table below lists the files that exist today.
+driver, the CLI's option surface and backend mapping, the pass and fail decision, the case
+validator, the CoWork grader and the panel over the case history. The table below lists every
+test file.
 
 These are not evals. An eval needs a model in the loop. If a failure can be caught by
 pytest, it is not an eval.
 
 A hand-written case tree under `tests/data/cases/`, `tests/data/validate/`,
-`tests/data/checks/` and `tests/data/cli/`, a hand-written session document under
-`tests/data/documents/`, a hand-written result document under `tests/data/results/`, a
-hand-written history file under `tests/data/history/` and a recorded judge reply under
-`tests/data/judge/` are input on disk, not stand-ins. The reader, the graders, the validator,
-the verdict, the panel and the vote counting that parse them are the real ones.
+`tests/data/checks/` and `tests/data/cli/`, a hand-written session directory under
+`tests/data/cowork/`, a hand-written session document under `tests/data/documents/`, a
+hand-written result document under `tests/data/results/`, a hand-written history file under
+`tests/data/history/`, a recorded container probe under `tests/data/docker/`, and a recorded
+judge reply, PNG or PDF under `tests/data/judge/` are input on disk, not mocks. The reader,
+the graders, the validator, the verdict, the panel, the parity check, the vote counting and
+the check judge that read them are the real ones.
 
 A check file under `tests/data/checks/` is input on disk too, and it is the one fixture that
 is executed rather than parsed: the loader that imports it is the real one, and the file is
@@ -54,46 +57,62 @@ No test is skipped, in either tier. A selected test runs and either passes or fa
 unbuilt environment, an unconfigured profile and an empty profile are failures, not skips.
 A skipped test reports as a pass and hides the thing it was written to catch.
 
-| File                              | Covers                                                     | Exists |
-| --------------------------------- | ---------------------------------------------------------- | ------ |
-| `unit/test_environments.py`       | Both interpreters, the two requirements files, the scripts | yes    |
-| `unit/test_config.py`             | `cowork_evals.yaml`, its three sections, and the `Config`  | yes    |
-| `unit/test_cowork.py`             | The CoWork driver: reading, refusing, submitting, waiting  | yes    |
-| `unit/test_harness.py`            | The `claude plugin eval` argument list                     | yes    |
-| `unit/test_docker.py`             | The image digest, and the build, login and run argument lists | yes |
-| `unit/test_parity.py`             | Recorded container probes against the image inventory      | yes    |
-| `unit/test_cases.py`              | The case reader over hand-written case trees               | yes    |
-| `unit/test_grader.py`             | The four structural graders over hand-written session documents | yes |
-| `unit/test_judge.py`              | The composed text, and vote counting over recorded reply documents | yes |
-| `unit/test_results.py`            | The v1 result document, field by field                     | yes    |
-| `unit/test_cowork_backend.py`     | What a session cannot run, `plan()`, and the document a declared suite writes | yes |
-| `unit/test_pytest_image.py`       | The test image digest, and the build and run argument lists | yes    |
-| `unit/test_validate.py`           | The case validator and the coverage report over hand-written trees | yes |
-| `unit/test_logs.py`               | The run directory, `env.txt`, `latest`, pruning and the tee | yes    |
-| `unit/test_traces.py`             | What is kept out of a run on either backend, and the two validity checks over the kept trace, over sandboxes and session directories written by the test | yes |
-| `unit/test_checks.py`             | The check layer: discovery, the loader, execution, and what it appends to the document, over hand-written case trees and run directories | yes |
-| `unit/test_verdict.py`               | Pass and fail over hand-written result documents                | yes    |
-| `unit/test_panel.py`              | The history store, the record, the join to the case tree, and the renders | yes |
-| `unit/test_preflight.py`          | Each backend's unmet conditions, and the rate ceiling      | yes    |
-| `unit/test_cli.py`                | The parser, the refusals, the verbs and the exit codes     | yes    |
-| `unit/test_cli_docs_init.py`      | The `docs` and `init` verbs: what they print and what they write | yes |
-| `unit/test_resources.py`          | The shipped documentation and data, the two reference rules, and the skill against the documents it condenses | yes |
-| `integration/test_cowork.py`      | The same driver against a real profile and a real run      | yes    |
-| `integration/test_docker.py`      | The built image, its mounts, its sandbox and one real eval run | yes |
-| `integration/test_judge.py`       | The judge against the real `claude -p`, and the check judge over a real PNG and a real PDF | yes |
-| `integration/test_cowork_backend.py` | The backend against a real profile, and one real suite   | yes    |
-| `integration/test_pytest_image.py` | The built test image, its exit codes, and what it writes | yes    |
-| `integration/test_cli.py`         | The command against the real backends, through the executable, `panel` over the history a real run left, and `ask` against a live session | yes |
+| File                                 | Covers |
+| ------------------------------------ | ------ |
+| `conftest.py`                        | The fixtures both tiers use: `repository`, `working_directory`, `plugin` |
+| `unit/conftest.py`                   | The builders and recorded documents more than one unit file reads |
+| `unit/test_environments.py`          | Both interpreters, the two requirements files, the scripts |
+| `unit/test_config.py`                | `cowork_evals.yaml`, its sections, and the `Config` |
+| `unit/test_cowork.py`                | The CoWork driver: reading, refusing, submitting, waiting |
+| `unit/test_harness.py`               | The `claude plugin eval` argument list |
+| `unit/test_docker.py`                | The image digest, and the build, login and run argument lists |
+| `unit/test_parity.py`                | Recorded container probes against the image inventory |
+| `unit/test_cases.py`                 | The case reader over hand-written case trees |
+| `unit/test_grader.py`                | The structural graders over hand-written session documents |
+| `unit/test_judge.py`                 | The composed text, and vote counting over recorded reply documents |
+| `unit/test_results.py`               | The v1 result document, field by field |
+| `unit/test_cowork_backend.py`        | What a session cannot run, `plan()`, and the document a declared suite writes |
+| `unit/test_pytest_image.py`          | The test image digest, and the build and run argument lists |
+| `unit/test_validate.py`              | The case validator and the coverage report over hand-written trees |
+| `unit/test_logs.py`                  | The run directory, `env.txt`, `latest`, pruning and the tee |
+| `unit/test_traces.py`                | What is kept out of a run on either backend, and the two validity checks over the kept trace, over sandboxes and session directories written by the test |
+| `unit/test_checks.py`                | The check layer: discovery, the loader, execution, and what it appends to the document, over hand-written case trees and run directories |
+| `unit/test_verdict.py`               | Pass and fail over hand-written result documents |
+| `unit/test_panel.py`                 | The history store, the record, the join to the case tree, and the renders |
+| `unit/test_preflight.py`             | Each backend's unmet conditions, and the rate ceiling |
+| `unit/test_cli.py`                   | The parser, the refusals, the verbs, `docs` and `init` included, and the exit codes |
+| `unit/test_resources.py`             | The shipped documentation and data, the two reference rules, and the skill against the documents it condenses |
+| `integration/conftest.py`            | The `integration` marker, and the `keyboard`, `attended` and `images` fixtures |
+| `integration/test_cowork.py`         | The same driver against a real profile and a real run |
+| `integration/test_docker.py`         | The built image, its mounts, its sandbox and real eval runs |
+| `integration/test_judge.py`          | The judge against the real `claude -p`, and the check judge over a real PNG and a real PDF |
+| `integration/test_cowork_backend.py` | The backend against a real profile, and one real suite |
+| `integration/test_pytest_image.py`   | The built test image, its exit codes, and what it writes |
+| `integration/test_cli.py`            | The command against the real backends, through the executable, `panel` over the history a real run left, and `ask` against a live session |
 
 One file per unit under test, named after the unit and not after the scenario. A unit tested
 in both tiers keeps its name in both directories, which is why `pyproject.toml` sets
 `--import-mode=importlib`: two files may share a basename, and neither directory carries an
-`__init__.py`. Fixtures go under `tests/data/`, and `tests/conftest.py` holds what both
-tiers share. No test in the default selection starts a live eval run, a container or a
-CoWork session: it asserts over recorded output, and `--dry-run` is how the command line is
-asserted over without spending money.
+`__init__.py`. Fixtures go under `tests/data/`, `tests/conftest.py` holds what both
+tiers share, and `tests/unit/conftest.py` holds what more than one unit file reads. No test
+in the default selection starts a live eval run, a container or a CoWork session: it asserts
+over recorded output, and `--dry-run` is how the command line is asserted over without
+spending money.
 
-The driver asks for the keyboard inside a submission, so a unit test may call `_consented`
+One test per requirement. A behaviour stated in `docs/`, `README.md` or this file is asserted
+by one test, in the tier that can reach it, and a second test of it is deleted.
+
+Each test file is shorter than its unit: the module of the same name under
+`src/cowork_evals/`, with `docker/__init__.py` for `test_docker.py`, `docker/parity.py` for
+`test_parity.py`, `docker/pytest_image.py` for `test_pytest_image.py`, and `requirements.py`
+with `scripts/*.sh` for `test_environments.py`. `tests/` as a whole is shorter than
+`src/cowork_evals/`. A parametrised test, a typed builder or a fixture under `tests/data/` is
+how a file stays shorter.
+
+Test code obeys the typed data rule in [../CLAUDE.md](../CLAUDE.md): a recorded document is
+read into the package's own model, and an expected value is compared against that model.
+
+The driver asks for the keyboard inside a submission, so a unit test may call `consent`
 under `cowork.consent: none` and may never call `run` or `submit` without it. Either one
 opens a real modal and then activates the application.
 
@@ -152,17 +171,24 @@ already made. Every test in it but one needs no CoWork profile: everything the c
 above a backend is backend-neutral and is proven on `--docker`, and the option mapping is
 proven with `--dry-run --cowork` in the unit tier. Nothing there builds an image or logs in.
 
-Its first `live` test fires `plugins/smoke/` through `cowork_evals run --docker` and asserts
-the whole log layout over that same run, `run.log` and the run's collected trace included. That log line is the
-descriptor-level tee proven against a real child process, and it cannot be reached without
-one. One more fires the `checked-file` case and reads what the check layer left: the `FAIL`
-line, the appended grader result, `checks.jsonl` and `scratch/`. Its two `test` verb tests
-cost a container and no model call, so neither is `live`.
+The session fixture `images` in `integration/conftest.py` asserts the daemon and both images
+once, for this file and for `integration/test_pytest_image.py`.
 
-One `live` test fires one case and then reads the record that run left, through
-`cowork_evals panel`. It writes a `cowork_evals.yaml` naming a history root under `tmp_path`,
-because `--out` does not move the history and a test left on the default would append to the
-developer's own tree. See [../docs/panel.md](../docs/panel.md).
+Its first `live` test fires the `python-version` case of `plugins/smoke/` through the
+executable as `cowork_evals run --docker`, and makes every assertion this tier can over that
+one run: the whole log layout, `run.log` and the run's collected trace included, the record
+the run appended and its row in `cowork_evals panel`, and a forwarded variable whose value
+reaches no file the run left. The `run.log` line is the descriptor-level tee proven against a
+real child process, and it cannot be reached without one. The test writes a
+`cowork_evals.yaml` naming a history root under `tmp_path`, because `--out` does not move the
+history and a test left on the default would append to the developer's own tree. See
+[../docs/panel.md](../docs/panel.md).
+
+One more fires the `writes-a-file` case under a grant that carries no tool that can create a
+file, and asserts that the run fails instead of scoring. One more fires the `checked-file`
+case and reads what the check layer left: the `FAIL` line, `checks.jsonl` and `scratch/`. Its
+`test` verb test, over a passing and a failing suite, costs a container and no model call, so
+it is not `live`.
 
 The one `live` test that needs a profile is `ask`. It reaches a live session and
 there is no other way to prove that the verb submits, waits, prints an answer and names a
@@ -175,26 +201,24 @@ the same cost: a VM boot, one entry against the rate ceiling, and a permanent se
 signed-in CoWork, the desktop application running, the macOS Accessibility grant and
 `cowork_evals.yaml` naming the active profile, and `claude` on `PATH` as well, because the
 judge and `claudeVersion` both need it. A missing precondition fails the test and never
-skips it. Its two `live` tests fire real CoWork sessions; its three others submit nothing:
-two walk the sessions already in the profile, and one runs the `capped-turns` fixture through
-the backend, which declares itself unrunnable there and is decided without a submission.
+skips it. Both its tests are `live` and fire real CoWork sessions.
 
 `integration/test_judge.py` needs only `claude` on `PATH`. It spends, so it is `live`, but
 it starts no CoWork session and costs no ceiling entry.
 
 ### The live marker
 
-Sixteen integration tests submit a real run. The five CoWork ones each cost a VM boot, count
+Twelve integration tests submit a real run. The four CoWork ones each cost a VM boot, count
 against the driver's rate ceiling and leave a permanent session in the signed-in account.
-The eight container ones cost the model calls their case makes, and the three judge ones cost
-short `claude -p` calls. All sixteen carry `live` as well as `integration`. An integration run
+The five container ones cost the model calls their case makes, and the three judge ones cost
+short `claude -p` calls. All twelve carry `live` as well as `integration`. An integration run
 that must not spend selects `-m "integration and not live"`.
 
 The CoWork ones need the macOS Accessibility grant, a signed-in CoWork, the desktop
 application already running, and `cowork_evals.yaml` naming the active profile. They fail,
 and do not skip, when no profile is configured. Nothing steals focus while one runs. See
-[../docs/cowork_desktop.md](../docs/cowork_desktop.md) for the authorizations. Four of them
-are in the two CoWork files and the fifth is `ask`, in `integration/test_cli.py`. The eight
+[../docs/cowork_desktop.md](../docs/cowork_desktop.md) for the authorizations. Three of them
+are in the two CoWork files and the fourth is `ask`, in `integration/test_cli.py`. The five
 container ones need a credential route, and fail without one.
 
 The integration tier asks for the keyboard once, before the first test that takes it, through
@@ -205,16 +229,18 @@ keyboard goes through one of them. A run that selects neither, a Docker-only one
 shows no dialog. It needs no CoWork profile. Cancel raises code 2, and every test that takes the
 keyboard then errors.
 
-`-m "integration and not live"` takes the keyboard too: two focus tests in
-`integration/test_cowork.py` activate Finder, and `live` does not select them.
+`-m "integration and not live"` takes the keyboard too: the focus test in
+`integration/test_cowork.py` activates Finder, and `live` does not select it.
 
 Every CoWork test that fires reads the `attended` fixture in `integration/conftest.py`. It
-copies this machine's `cowork_evals.yaml` and forces `cowork.consent: dialog`, so a developer
-whose own file carries `none` is still warned by a test run. The modal does not appear a
-second time, because `keyboard` already asked and consent is once per process. It is a
-configuration value, not a seam: the fixture writes a file exactly as a consumer would, and
-no parameter injects an answer. The driver's own consent is module state, which is what makes
-one ask cover a whole run.
+loads this machine's `cowork_evals.yaml` into a `Config` and returns it with
+`cowork.consent: dialog`, so a developer whose own file carries `none` is still warned by a
+test run. A missing file or a file that names no profile fails the test. The modal does not
+appear a second time, because `keyboard` already asked and consent is once per process. It is
+a configuration value, not a seam: the `Config` is what a consumer's file loads to, and no
+parameter injects an answer. `ask` reads its configuration from the working directory, so its
+test writes the `Config` there with `Config.dump`. The driver's own consent is module state,
+which is what makes one ask cover a whole run.
 
 Everything in this repository is 3.10, tests included, and ruff targets `py310`, so a file
 here parses on the runtime as well. What still belongs to the code a consumer points the

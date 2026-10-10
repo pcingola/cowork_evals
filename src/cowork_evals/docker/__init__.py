@@ -11,12 +11,14 @@ fail: that is the CLI's, in docs/cli.md.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..cases import CaseError
 from ..cases import plugin_root as cases_plugin_root
@@ -146,6 +148,42 @@ def remedy(condition: Condition) -> str:
             )
 
 
+@dataclass(frozen=True, slots=True)
+class Unmet:
+    """One unmet condition: what a caller selects on, and the line a person reads."""
+
+    condition: Condition
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class Image:
+    """One row of `docker image ls`: a tag and the moment it was built."""
+
+    tag: str
+    created: datetime
+
+
+class OAuth(BaseModel):
+    """The `claudeAiOauth` section of the credentials file, as far as this package reads it."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    access_token: str | None = Field(default=None, alias="accessToken")
+    refresh_token: str | None = Field(default=None, alias="refreshToken")
+    expires_at: int | None = Field(default=None, alias="expiresAt")
+    scopes: list[str] | None = None
+    subscription_type: str | None = Field(default=None, alias="subscriptionType")
+
+
+class Credentials(BaseModel):
+    """The credentials file the Claude Code CLI writes into the login directory."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    claude_ai_oauth: OAuth | None = Field(default=None, alias="claudeAiOauth")
+
+
 class DockerError(Exception):
     """A container backend failure, carrying a message and nothing else."""
 
@@ -169,7 +207,7 @@ def images_argv(*repositories: str) -> list[str]:
     return argv + ["--format", IMAGE_FORMAT]
 
 
-def parse_images(output: str) -> list[tuple[str, datetime]]:
+def parse_images(output: str) -> list[Image]:
     """What `docker image ls` printed, as tags and creation dates, sorted by tag.
 
     A row in a format this cannot parse is dropped: it is not an image to delete, and a
@@ -183,11 +221,11 @@ def parse_images(output: str) -> list[tuple[str, datetime]]:
             when = datetime.strptime(created[:CREATED_LENGTH], CREATED_FORMAT)
         except ValueError:
             continue
-        found.append((tag, when))
-    return sorted(found)
+        found.append(Image(tag=tag, created=when))
+    return sorted(found, key=lambda image: (image.tag, image.created))
 
 
-def images(*repositories: str) -> list[tuple[str, datetime]]:
+def images(*repositories: str) -> list[Image]:
     """Each tag and the moment it was built, sorted by tag."""
     try:
         completed = subprocess.run(
@@ -636,25 +674,25 @@ class Docker:
         absence of both tokens means no login.
         """
         try:
-            content = json.loads(self.credentials_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            credentials = Credentials.model_validate_json(
+                self.credentials_file.read_text(encoding="utf-8")
+            )
+        except (OSError, ValidationError):
             return False
-        if not isinstance(content, dict):
+        oauth = credentials.claude_ai_oauth
+        if oauth is None:
             return False
-        oauth = content.get("claudeAiOauth")
-        if not isinstance(oauth, dict):
-            return False
-        return bool(oauth.get("accessToken") or oauth.get("refreshToken"))
+        return bool(oauth.access_token or oauth.refresh_token)
 
-    def check(self) -> list[tuple[Condition, str]]:
+    def check(self) -> list[Unmet]:
         """The unmet conditions, in order, each with the command that fixes it.
 
         An empty list means ready. It writes nothing and builds nothing.
         """
-        unmet: list[tuple[Condition, str]] = []
+        unmet: list[Unmet] = []
         if not self.daemon_is_reachable():
             unmet.append(
-                (
+                Unmet(
                     Condition.DAEMON,
                     f"docker daemon is not reachable: {remedy(Condition.DAEMON)}",
                 )
@@ -663,20 +701,20 @@ class Docker:
         # condition this run cannot know. The credential is on the host and is read either way.
         elif not self.image_is_present():
             unmet.append(
-                (Condition.IMAGE, f"image {self.tag} is absent: {remedy(Condition.IMAGE)}")
+                Unmet(Condition.IMAGE, f"image {self.tag} is absent: {remedy(Condition.IMAGE)}")
             )
         unmet += self.check_credential()
         unmet += self.check_environment()
         return unmet
 
-    def check_credential(self) -> list[tuple[Condition, str]]:
+    def check_credential(self) -> list[Unmet]:
         """The configured route's credential, and never the other route's. docs/docker.md."""
         if self.uses_login:
             if self.has_credential():
                 return []
-            return [(Condition.CREDENTIAL, f"no credential: {remedy(Condition.CREDENTIAL)}")]
+            return [Unmet(Condition.CREDENTIAL, f"no credential: {remedy(Condition.CREDENTIAL)}")]
         return [
-            (
+            Unmet(
                 Condition.BEDROCK,
                 f"docker.credential is {CREDENTIAL_BEDROCK} and {name} is unset or empty on "
                 f"this host: {remedy(Condition.BEDROCK)}",
@@ -685,7 +723,7 @@ class Docker:
             if not os.environ.get(name)
         ]
 
-    def check_environment(self) -> list[tuple[Condition, str]]:
+    def check_environment(self) -> list[Unmet]:
         """One line per forwarded name that cannot be forwarded, and never a value.
 
         A credential name is refused whatever it holds, so it is decided before the host is
@@ -693,11 +731,11 @@ class Docker:
         condition, because forwarding an empty string is a run that looks configured and is
         not.
         """
-        unmet: list[tuple[Condition, str]] = []
+        unmet: list[Unmet] = []
         for name in self.env_passthrough:
             if name in CREDENTIAL_NAMES:
                 unmet.append(
-                    (
+                    Unmet(
                         Condition.ENV_CREDENTIAL,
                         f"docker.env_passthrough names {name}, which carries Claude's own "
                         f"credential: {remedy(Condition.ENV_CREDENTIAL)}",
@@ -705,7 +743,7 @@ class Docker:
                 )
             elif not self.environment()[name]:
                 unmet.append(
-                    (
+                    Unmet(
                         Condition.ENVIRONMENT,
                         f"docker.env_passthrough names {name}, which is unset or empty on "
                         f"this host: {remedy(Condition.ENVIRONMENT)}",

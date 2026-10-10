@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "claudeVersion": "2.1.270",
+  "startedAt": "2026-09-13T10:00:00+00:00",
+  "durationSeconds": 4.2,
+  "costUsd": 0.061,
+  "partial": false,
+  "suite": {
+    "root": "/plugin",
+    "ablation": "none",
+    "threshold": 0,
+    "judgeModel": "haiku",
+    "plugins": [{"name": "smoke", "path": "/plugin"}]
+  },
+  "cases": [
+    {
+      "name": "checked-file",
+      "dir": "evals/plugin/checked-file",
+      "source": "prose",
+      "promptMarkdown": "Write WRITTEN into written.txt.",
+      "graders": [
+        {"name": "wrote-it", "type": "file_exists", "weight": 1, "config": {}},
+        {"name": "assertions.the_file_says_written", "type": "check-advisory", "weight": 1, "config": {}}
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1.0,
+            "passed": true,
+            "turns": 2,
+            "costUsd": 0.061,
+            "judgeCostUsd": 0.0,
+            "error": null,
+            "skippedPaidGraders": false,
+            "graders": [
+              {"name": "wrote-it", "passed": true, "weight": 1,
+               "explanation": "created written.txt", "withOnly": false, "scored": true},
+              {"name": "assertions.the_file_says_written", "passed": false, "weight": 1,
+               "explanation": "AssertionError: written.txt says NOTHING",
+               "withOnly": false, "scored": false}
+            ]
+          }
+        ]
+      },
+      "aggregates": {"score": 1.0, "passRate": 1.0}
+    }
+  ],
+  "aggregates": {"casesTotal": 1, "casesPassed": 1, "overallScore": 1.0, "overallPassRate": 1.0}
+}

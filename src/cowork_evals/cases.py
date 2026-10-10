@@ -11,14 +11,14 @@ missing keys left for the case validator, which cannot report what the reader de
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import frontmatter
 import yaml
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 # What makes a directory a case, a case's optional second file, and its grader directory.
 # docs/eval_format.md.
@@ -71,16 +71,191 @@ class CaseError(Exception):
     """A case tree that cannot be read: unparsable YAML, or no plugin root."""
 
 
+class PluginManifest(BaseModel):
+    """`.claude-plugin/plugin.json`, as far as this package reads it."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str | None = None
+    version: str | None = None
+
+
+class PromptFrontmatter(BaseModel):
+    """The typed view of `Case.frontmatter_keys`. `model_fields_set` is what was written."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    schema_version: str | None = None
+    name: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    plugins: list[str] | None = None
+    runs: int | None = None
+    max_turns: int | None = None
+    timeout_seconds: float | None = None
+    model: str | None = None
+    allowed_tools: list[str] | None = None
+    append_system_prompt: str | None = None
+    env: dict[str, str] | None = None
+    expected_outcome: str | None = None
+
+
+class CaseContext(BaseModel):
+    """The `context:` mapping of `case.yaml`."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    add_dirs: list[str] | None = None
+    scaffold_script: str | None = None
+    history_file: str | None = None
+
+
+class CaseYaml(BaseModel):
+    """The typed view of `Case.case_yaml_keys`, with `context.<key>` nested back."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    schema_version: str | None = None
+    name: str | None = None
+    context: CaseContext | None = None
+
+
+# The grader configs. Each is a grader file's frontmatter less `name`, `type` and `weight`,
+# with the defaults the grader applies. Every one allows extra keys, so an authored key this
+# package does not read reaches the result document unchanged. docs/eval_format.md.
+
+
+class FileTarget(BaseModel):
+    """`{source: file, path}`: a produced file as a `target` or a `focus`."""
+
+    model_config = ConfigDict(extra="allow")
+
+    source: Literal["file"]
+    path: str
+
+
+class ToolSpec(BaseModel):
+    """The object form of a `tool_order` end."""
+
+    model_config = ConfigDict(extra="allow")
+
+    tool: str
+    input_match: str | None = None
+
+
+class RegexConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    pattern: str | None = None
+    flags: str = ""
+    match: str = "contains"
+    target: str | FileTarget = "last_message"
+
+
+class ToolUsedConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    tool: str | None = None
+    input_match: str | None = None
+    min: int = 1
+    max: int | None = None
+
+
+class ToolOrderConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    before: str | ToolSpec | None = None
+    after: str | ToolSpec | None = None
+
+
+class FileExistsConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    path: str | None = None
+    exists: bool = True
+
+
+class LlmGraderConfig(BaseModel):
+    """`criteria` is the body when absent. `target` is not a field: the harness ignores it."""
+
+    model_config = ConfigDict(extra="allow")
+
+    criteria: str | None = None
+    focus: str | FileTarget = "last_message"
+
+
+class BaselineGraderConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    baseline_file: str | None = None
+    criteria: str | None = None
+
+
+GraderConfig = (
+    RegexConfig
+    | ToolUsedConfig
+    | ToolOrderConfig
+    | FileExistsConfig
+    | LlmGraderConfig
+    | BaselineGraderConfig
+)
+
+# The config each grader type reads. A type not here has no config.
+GRADER_CONFIGS: dict[str, type[BaseModel]] = {
+    "regex": RegexConfig,
+    "tool_used": ToolUsedConfig,
+    "tool_order": ToolOrderConfig,
+    "file_exists": FileExistsConfig,
+    "llm": LlmGraderConfig,
+    "baseline": BaselineGraderConfig,
+}
+
+
 @dataclass(frozen=True, slots=True)
 class Grader:
-    """One file under `graders/`. Its frontmatter, split into what every grader has."""
+    """One file under `graders/`. Its frontmatter, split into what every grader has.
+
+    `config` is the typed config `type` selects. It is `None` for a type nothing knows, and
+    for a config that does not validate, which also sets `config_error` to the reason. A
+    grader with a `config_error` fails with that reason when it is graded.
+    """
 
     name: str
     type: str
     weight: int | float
-    config: dict[str, Any]
+    config: GraderConfig | None
     markdown: str
     path: Path
+    config_error: str | None = None
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        name: str,
+        type: str,
+        weight: int | float,
+        keys: dict[str, Any],
+        markdown: str,
+        path: Path,
+    ) -> Grader:
+        """One grader, with `keys`, the frontmatter less name, type and weight, validated."""
+        model = GRADER_CONFIGS.get(type)
+        config, error = None, None
+        if model is not None:
+            try:
+                config = model.model_validate(keys)
+            except ValidationError as invalid:
+                error = _validation_message(invalid)
+        return cls(
+            name=name,
+            type=type,
+            weight=weight,
+            config=config,  # type: ignore[arg-type]
+            markdown=markdown,
+            path=path,
+            config_error=error,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +292,29 @@ class Case:
         """Whether the case carries the reserved tag. It is read here and nowhere else."""
         return NO_COWORK in self.tags
 
+    @property
+    def frontmatter(self) -> PromptFrontmatter:
+        """`frontmatter_keys`, typed. A mapping that does not validate raises `CaseError`."""
+        try:
+            return PromptFrontmatter.model_validate(self.frontmatter_keys)
+        except ValidationError as invalid:
+            raise CaseError(f"{self.path}: {_validation_message(invalid)}") from invalid
+
+    @property
+    def case_yaml(self) -> CaseYaml:
+        """`case_yaml_keys`, typed, with each `context.<key>` nested back under `context`."""
+        nested: dict[str, Any] = {}
+        for key, value in self.case_yaml_keys.items():
+            if key.startswith(f"{CONTEXT}."):
+                nested.setdefault(CONTEXT, {})[key[len(CONTEXT) + 1 :]] = value
+            else:
+                nested[key] = value
+        try:
+            return CaseYaml.model_validate(nested)
+        except ValidationError as invalid:
+            path = self.directory / CASE_YAML
+            raise CaseError(f"{path}: {_validation_message(invalid)}") from invalid
+
 
 def plugin_root(target: Path | str) -> Path:
     """The nearest directory at or above `target` holding `.claude-plugin/plugin.json`."""
@@ -134,14 +332,16 @@ def plugin_name(root: Path | str) -> str:
     the run directory is named for. docs/eval_format.md.
     """
     resolved = Path(root).resolve()
+    return plugin_manifest(resolved).name or resolved.name
+
+
+def plugin_manifest(root: Path | str) -> PluginManifest:
+    """The manifest of a plugin root. One that will not read or validate names nothing."""
     try:
-        manifest = json.loads((resolved / PLUGIN_MANIFEST).read_text(encoding="utf-8"))
+        text = (Path(root) / PLUGIN_MANIFEST).read_text(encoding="utf-8")
+        return PluginManifest.model_validate_json(text)
     except (OSError, ValueError):
-        return resolved.name
-    if not isinstance(manifest, dict):
-        return resolved.name
-    named = manifest.get("name")
-    return named if isinstance(named, str) and named else resolved.name
+        return PluginManifest()
 
 
 def plugin_roots(target: Path | str) -> list[Path]:
@@ -260,16 +460,24 @@ def _graders(directory: Path) -> tuple[Grader, ...]:
         kind = metadata.pop("type", None)
         weight = metadata.pop("weight", DEFAULT_WEIGHT)
         graders.append(
-            Grader(
+            Grader.build(
                 name=name if isinstance(name, str) and name else path.stem,
                 type=kind if isinstance(kind, str) else "",
                 weight=weight if isinstance(weight, int | float) else DEFAULT_WEIGHT,
-                config=metadata,
+                keys=metadata,
                 markdown=post.content,
                 path=path,
             )
         )
     return tuple(graders)
+
+
+def _validation_message(invalid: ValidationError) -> str:
+    """One line per error, each naming the key, without pydantic's documentation links."""
+    return "; ".join(
+        f"{'.'.join(str(part) for part in error['loc']) or '(top level)'}: {error['msg']}"
+        for error in invalid.errors()
+    )
 
 
 def _post(path: Path) -> frontmatter.Post:
