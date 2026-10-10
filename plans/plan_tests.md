@@ -162,7 +162,7 @@ box comes first, which is why `tests/integration/test_pytest_image.py` precedes
 - [x] [`tests/unit/test_environments.py`](plan_tests/unit_test_environments.md)
 - [x] [`tests/unit/test_resources.py`](plan_tests/unit_test_resources.md). Docs: `docs/cli.md` "docs" (the name escape).
 - [x] [`tests/unit/test_cli_docs_init.py`](plan_tests/unit_test_cli_docs_init.md) and [`tests/unit/test_cli.py`](plan_tests/unit_test_cli.md) in one commit, which merges the first file into the second. Docs: `docs/cli.md` "Synopsis" (`--version`).
-- [ ] [`tests/integration/test_cowork.py`](plan_tests/integration_test_cowork.md)
+- [x] [`tests/integration/test_cowork.py`](plan_tests/integration_test_cowork.md)
 - [ ] [`tests/integration/test_cowork_backend.py`](plan_tests/integration_test_cowork_backend.md)
 - [ ] [`tests/integration/test_judge.py`](plan_tests/integration_test_judge.md)
 - [ ] [`tests/integration/test_cli.py`](plan_tests/integration_test_cli.md)
