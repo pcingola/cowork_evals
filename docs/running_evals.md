@@ -59,7 +59,7 @@ like every other skip.
 | `eval.judge_model`  | `haiku`                  | `--judge-model`        | the judge for `llm` and `baseline` graders  |
 | `eval.judge_votes`  | 3                        |                        | votes per judged grader. The majority is its result |
 | `eval.ablation`     | `none`                   | `--ablation`           | one arm, or the with and without arms       |
-| `eval.delta_threshold` | 0                     | `--delta-threshold`    | the lowest passing delta, on two arms       |
+| `eval.delta_threshold` | 0                     | `--delta-threshold`    | the delta a case must exceed, on two arms   |
 | `eval.max_cost_usd` | 5                        | `--max-cost-usd`       | the ceiling over one plugin's suite         |
 | `eval.allow_tools`  | the session mirror below | `--allow-tools`        | the tool grant                              |
 | `eval.keep_traces`  | true                     | `--[no-]keep-traces`   | keep every run's artefacts                  |
@@ -107,7 +107,7 @@ once for the whole invocation.
 | Any case or grader reported skipped                                          | exit 1          |
 | A grader reported `scored: false` on a one-arm run                           | exit 1          |
 | A grader reported `scored: false` on a two-arm run                           | printed only, as an indicator, when it did not fire |
-| A case's delta is below `eval.delta_threshold`, on two arms                  | exit 1          |
+| A case's delta is at or below `eval.delta_threshold`, on two arms            | exit 1          |
 | A case carries no delta, on two arms                                         | exit 1          |
 | A case declared `no-cowork`, on `--cowork`                                   | exit 0, counted |
 | `partial: true`, for any reason                                              | exit 1          |
@@ -163,8 +163,8 @@ without a warning. Neither can fire on CoWork.
 
 `--ablation with-without` runs every case twice. The with-arm loads the plugin. The
 without-arm loads no plugin. Each case is decided on its own delta, `score - scoreWithout`,
-never on a suite average. A case below `eval.delta_threshold` fails on a line naming both
-scores and the delta.
+never on a suite average. A case at or below `eval.delta_threshold` fails on a line naming
+both scores and the delta. At the default of 0, a case the plugin did not improve fails.
 
 It doubles the cost, it is off by default, and it is `--docker` only. `--ablation` and
 `--delta-threshold` exit 2 on `--cowork`.

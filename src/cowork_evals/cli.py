@@ -694,7 +694,7 @@ def _keeping(args: argparse.Namespace, config: Config) -> bool:
 
 
 def _delta_threshold(args: argparse.Namespace, config: Config) -> float:
-    """What a case's delta must reach, resolved through the one ladder. docs/library.md.
+    """What a case's delta must exceed, resolved through the one ladder. docs/library.md.
 
     It is read here and handed to the verdict, which reads no configuration file of its own,
     so one invocation resolves every setting once. It never reaches the harness command line:

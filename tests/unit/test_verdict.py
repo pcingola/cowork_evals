@@ -289,10 +289,10 @@ def test_a_document_whose_trace_is_not_on_disk_names_nothing(
 
 def test_a_delta_above_the_threshold_passes_and_the_mean_is_on_the_line(tmp_path: Path) -> None:
     result = judge(run_directory(tmp_path, smoke="two_arm"), found=2, picked=2)
-    assert result.passed
-    assert failures(result) == []
+    assert ("fires-and-answers", "pass") in outcomes(result)
+    assert not any("fires-and-answers" in line for line in failures(result))
     assert result.lines[-1] == (
-        "2 found, 2 picked, 2 ran, 2 passed, 0 declared unrunnable, "
+        "2 found, 2 picked, 2 ran, 1 passed, 0 declared unrunnable, "
         "overall score 1.00, mean delta +0.50"
     )
 
@@ -309,12 +309,26 @@ def test_a_delta_below_the_threshold_fails_and_the_line_names_both_scores(
     ]
 
 
-def test_a_raised_threshold_fails_the_case_that_changed_nothing(tmp_path: Path) -> None:
-    result = judge(run_directory(tmp_path, smoke="two_arm"), found=2, picked=2, delta_threshold=0.5)
+def test_a_delta_equal_to_the_default_threshold_fails_the_case_that_changed_nothing(
+    tmp_path: Path,
+) -> None:
+    """The plugin scored what the model scored without it, so it added nothing."""
+    result = judge(run_directory(tmp_path, smoke="two_arm"), found=2, picked=2)
     assert not result.passed
     assert failures(result) == [
         "FAIL smoke/quiet-case: the delta is +0.00, with 1.00 and without 1.00, "
-        "and eval.delta_threshold is 0.5"
+        "and eval.delta_threshold is 0"
+    ]
+
+
+def test_a_delta_equal_to_a_raised_threshold_fails(tmp_path: Path) -> None:
+    result = judge(run_directory(tmp_path, smoke="two_arm"), found=2, picked=2, delta_threshold=1)
+    assert not result.passed
+    assert failures(result) == [
+        "FAIL smoke/fires-and-answers: the delta is +1.00, with 1.00 and without 0.00, "
+        "and eval.delta_threshold is 1",
+        "FAIL smoke/quiet-case: the delta is +0.00, with 1.00 and without 1.00, "
+        "and eval.delta_threshold is 1",
     ]
 
 
@@ -346,7 +360,7 @@ def test_a_two_arm_case_with_no_delta_fails_and_says_why(
 def test_an_unscored_grader_is_an_indicator_on_two_arms(tmp_path: Path) -> None:
     """The harness drops a with-only grader on purpose."""
     two = judge(run_directory(tmp_path, smoke="two_arm"), found=2, picked=2)
-    assert two.passed
+    assert not any("skill-fired" in line for line in failures(two))
     assert notes(two) == [
         "NOTE smoke/quiet-case: run 1: skill-fired: the with-only indicator did not fire"
     ]
@@ -432,7 +446,7 @@ def outcomes(result: Verdict) -> list[tuple[str, str]]:
         ("structural_failures", [("every-structural", "fail")]),
         ("declared_case", [("capped-turns", "declared")]),
         ("judged_failure", [("judged", "fail")]),
-        ("two_arm", [("fires-and-answers", "pass"), ("quiet-case", "pass")]),
+        ("two_arm", [("fires-and-answers", "pass"), ("quiet-case", "fail")]),
         ("two_arm_below_threshold", [("writes-a-file", "fail")]),
     ],
 )

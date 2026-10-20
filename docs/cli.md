@@ -112,7 +112,7 @@ is not granted is lost without a loud failure. See [running_evals.md](running_ev
 
 `--ablation with-without` runs every case a second time with no plugin loaded, and each case is
 decided on the delta between the two scores. `--delta-threshold N` is what that delta must
-reach. See [running_evals.md](running_evals.md).
+exceed. See [running_evals.md](running_evals.md).
 
 `--keep-traces` is on by default. `--no-keep-traces` turns it off, and either form beats the
 file. Off, three outcomes are lost: a tool refused by the permission mode and a granted tool

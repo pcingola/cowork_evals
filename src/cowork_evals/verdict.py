@@ -11,8 +11,8 @@ that declared the backend cannot run it is counted instead, and the summary line
 many, because that is a fact about the case and not a backend honouring nothing.
 
 A document of two arms is decided on each case's delta as well. What the plugin changed is
-the with-arm score minus the without-arm score, the document works it out, and a case below
-`eval.delta_threshold` fails. A two-arm case the document says is not comparable fails too:
+the with-arm score minus the without-arm score, the document works it out, and a case at or
+below `eval.delta_threshold` fails. A two-arm case the document says is not comparable fails too:
 the invocation asked for a delta and did not get one. Every other condition is unchanged and
 reads the with-arm.
 
@@ -234,8 +234,9 @@ def _judge_delta(where: str, case: CaseEntry, failures: list[str], delta_thresho
     """What the plugin changed, on one case of a two-arm run.
 
     The delta is `score - scoreWithout` and the document works it out, so this reads it and
-    re-derives nothing. A case below the threshold fails: the suite is green because the
-    model answered well on its own, which is the whole reason the arm was asked for.
+    re-derives nothing. A case at or below the threshold fails: the suite is green because
+    the model answered well on its own, which is the whole reason the arm was asked for. A
+    delta equal to the default threshold of 0 is a plugin that changed nothing, so it fails.
 
     A case the document says is not comparable fails as well. A two-arm run that produced no
     delta did not do what the invocation asked, and passing it would be the green-on-nothing
@@ -246,7 +247,7 @@ def _judge_delta(where: str, case: CaseEntry, failures: list[str], delta_thresho
     if delta is None:
         failures.append(f"{FAIL} {where}: {_incomparable(case)}")
         return
-    if delta < delta_threshold:
+    if delta <= delta_threshold:
         failures.append(
             f"{FAIL} {where}: the delta is {delta:+.2f}, "
             f"with {_number(aggregates.score)} and without {_number(aggregates.score_without)}, "
