@@ -262,7 +262,7 @@ name that is not there carries nothing.
 | Rule                                                             | Holds because                                                              |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
 | A named variable absent or empty on the host fails the preflight | A missing precondition fails. An empty string is not a value               |
-| A name that would carry Claude's own credential is refused       | The container login is the one route for that, whatever the variable holds |
+| A name that would carry Claude's own credential is refused       | `docker.credential` is the one route for that, whatever the variable holds |
 
 It exists so a skill whose whole job is calling an API can be evaluated at all. Without it such
 a skill fails every eval for a reason that has nothing to do with the skill. The setting, the

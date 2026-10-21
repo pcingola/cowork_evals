@@ -156,12 +156,12 @@ passes. An empty selection exits 2, and a malformed case exits 3.
 
 | Backend    | Requires                                                             | Fails when                                                  |
 | ---------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `--docker` | a Docker or Rancher daemon, the image at its current digest, the container login, each name in `docker.env_passthrough` set and non-empty on the host | the daemon is down, the image is absent or stale, there is no login, a forwarded name is unset or empty, or a forwarded name would carry Claude's own credential |
+| `--docker` | a Docker or Rancher daemon, the image at its current digest, the credential `docker.credential` names (the container login, or the four Bedrock variables set and non-empty on the host), each name in `docker.env_passthrough` set and non-empty on the host | the daemon is down, the image is absent or stale, there is no login or a Bedrock variable is unset, a forwarded name is unset or empty, or a forwarded name would carry Claude's own credential |
 | `--cowork` | macOS, `claude` on `PATH`, `cowork.profile` in `cowork_evals.yaml`, a readable sessions root under it, the Accessibility grant, the suite within `cowork.max_runs` | the platform is not macOS, `claude` is absent, no profile is configured, the sessions root is unreadable, the grant is missing, or the suite would exceed the ceiling |
 | `test`     | a daemon, the eval image, and the test image over it                 | the daemon is down, or an image is absent or stale          |
 
 A forwarded name that is unset or empty is one unmet line per name. A name that would carry
-Claude's own credential is refused whatever it holds, and the line names the container login as
+Claude's own credential is refused whatever it holds, and the line names `docker.credential` as
 the one route. Every line names the variable, never its value.
 
 On `--cowork`, `claude` is needed because the judge behind an `llm` or `baseline` grader is
@@ -242,7 +242,8 @@ Accessibility grant are set up by hand, and `check --cowork` reports what is mis
 
 ## login
 
-`login --docker` makes the container login this package owns, and builds nothing.
+`login --docker` makes the container login this package owns, and builds nothing. Under
+`docker.credential: bedrock` there is no login to make, and it refuses with exit 3.
 
 ```
 cowork_evals login --docker           # log in, or report the login already there
@@ -260,7 +261,8 @@ cowork_evals login --docker --force   # log in again over an existing login
 | stdin is not a terminal                    | says so, starts no container                 | 3    |
 | the login itself failed                    | the reason on stderr                         | 1    |
 
-There is no headless login and no API key route. The login opens a browser and reads a code
+There is no headless login and no API key route; `docker.credential: bedrock` is the route that
+needs no login ([docker.md](docker.md), "Credentials"). The login opens a browser and reads a code
 back in its own prompt. Use `--force` when the tokens are present and no longer work, or the
 account is wrong. A credentials file with no token is not a login, so `login --docker` starts a
 new one over it with no flag.

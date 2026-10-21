@@ -14,8 +14,9 @@ exercises the same versions a session does. The inventory it has to match is
   components come from upstream instead, each with one source.
 - **One image, one tag.** `cowork-evals:<digest>`, where the digest covers every build input.
   There is no `latest`.
-- **One credential route**: a login this package owns, mounted read-write. Never the
-  developer's own `~/.claude`, and never an API key.
+- **Two credential routes**, chosen by `docker.credential`: a login this package owns, mounted
+  read-write, or the four Bedrock variables forwarded from the host. Never the developer's own
+  `~/.claude`, and never an API key.
 - **Named host variables are forwarded**, and their values reach the container's environment
   and no artefact.
 - **A `Bash` call sees the CoWork session environment**, and the few names a Docker run needs
