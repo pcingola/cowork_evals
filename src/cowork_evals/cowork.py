@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import time
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
@@ -30,6 +31,7 @@ from pydantic import (
     model_validator,
 )
 
+from . import windows
 from .config import (
     CONSENT_NONE,
     PROMPT_LIMIT,
@@ -38,6 +40,9 @@ from .config import (
     CoWorkSection,
     _override,
 )
+
+# The driver runs `open` and `osascript` on macOS and the Win32 calls in `windows` on Windows.
+WINDOWS = sys.platform == "win32"
 
 # A session directory is exactly three levels below the sessions root and holds an
 # audit.jsonl. docs/cowork_desktop.md.
@@ -389,11 +394,17 @@ class CoWork:
         self._consented()
         self._clear()
         LOGGER.info("firing the deep link: %s", link)
-        self._fire(["open", link])
+        if WINDOWS:
+            self._native(windows.open_link, link)
+        else:
+            self._fire(["open", link])
         time.sleep(self._config.settle_seconds)
         self._guard()
         LOGGER.info("sending the synthetic Return")
-        self._fire(list(RETURN))
+        if WINDOWS:
+            self._native(windows.press_return)
+        else:
+            self._fire(list(RETURN))
 
         session_dir = self._discover(root, baseline)
         LOGGER.info("discovered the session: %s", session_dir)
@@ -421,10 +432,16 @@ class CoWork:
         reading the screen, which docs/cowork_desktop.md rules out.
         """
         LOGGER.info("activating CoWork")
-        self._fire(list(ACTIVATE))
+        if WINDOWS:
+            self._native(windows.activate)
+        else:
+            self._fire(list(ACTIVATE))
         self._guard()
         LOGGER.info("clearing the composer")
-        self._fire(list(CLEAR))
+        if WINDOWS:
+            self._native(windows.clear)
+        else:
+            self._fire(list(CLEAR))
 
     def _guard(self) -> None:
         """Code 9 when CoWork is not frontmost. Nothing is typed.
@@ -435,7 +452,7 @@ class CoWork:
         retrying blind is how a keystroke reaches an editor.
         """
         name = frontmost()
-        if name != COWORK_PROCESS:
+        if name.casefold() != COWORK_PROCESS.casefold():
             raise CoWorkError(
                 9,
                 f"{name} is frontmost, not {COWORK_PROCESS}: nothing was typed",
@@ -449,6 +466,13 @@ class CoWork:
         code = subprocess.run(argv, check=False).returncode
         if code != 0:
             raise CoWorkError(3, f"{argv[0]} returned {code}")
+
+    def _native(self, call: Any, *args: Any) -> None:
+        """Run one Win32 step. An `OSError` is code 3, as a non-zero `osascript` is."""
+        try:
+            call(*args)
+        except OSError as error:
+            raise CoWorkError(3, f"{call.__name__}: {error}") from error
 
     def _discover(self, root: Path, baseline: set[Path]) -> Path:
         """Poll for a session directory that is not in the baseline."""
@@ -639,6 +663,13 @@ def consent(section: CoWorkSection) -> None:
     global _CONSENTED
     if section.consent == CONSENT_NONE or _CONSENTED:
         return
+    if WINDOWS:
+        message = CONSENT_MESSAGE.format(timeout=section.consent_timeout)
+        if not windows.consent(message, CONSENT_TITLE, section.consent_timeout):
+            raise CoWorkError(2, "consent was not given: Cancel")
+        _CONSENTED = True
+        LOGGER.info("consent was given for this process")
+        return
     argv = [
         "osascript",
         "-e",
@@ -664,6 +695,11 @@ def frontmost() -> str:
     "the driver refused to type into something that was not CoWork" apart from "osascript
     is broken".
     """
+    if WINDOWS:
+        try:
+            return windows.frontmost()
+        except OSError as error:
+            raise CoWorkError(3, f"the frontmost process could not be read: {error}") from error
     completed = subprocess.run(list(FRONTMOST), capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         detail = completed.stderr.strip() or f"osascript returned {completed.returncode}"

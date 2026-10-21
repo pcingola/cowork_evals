@@ -7,6 +7,7 @@ back through the real loader.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -263,6 +264,16 @@ def test_a_path_expands_tilde_and_resolves_against_the_working_directory(
     assert config.cowork.log_dir == tmp_path / "build" / "logs"
     assert config.docker.login_dir == tmp_path / "build" / "login"
     assert config.panel.root == tmp_path / "build" / "history"
+
+
+def test_a_bare_profile_resolves_under_localappdata_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Where the Windows application keeps a profile, measured by scripts/windows_probe.py."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    root = CoWorkSection(profile="Claude-3p").sessions_root
+    assert root == tmp_path / "Claude-3p" / "local-agent-mode-sessions"
 
 
 @pytest.mark.parametrize("absolute", [False, True])

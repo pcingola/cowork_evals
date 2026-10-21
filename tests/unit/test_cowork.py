@@ -16,7 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from cowork_evals import CoWork, CoWorkError, CoWorkSection
+from cowork_evals import CoWork, CoWorkError, CoWorkSection, windows
+from cowork_evals import cowork as driver_module
 from cowork_evals.config import CONFIG_FILENAME, CONSENT_DIALOG, CONSENT_NONE
 from cowork_evals.cowork import LOGGER, RunLogEntry, SessionDocument, ToolCall, Turn, consent
 
@@ -382,3 +383,57 @@ def test_reading_a_session_never_asks_for_consent(driver: CoWork, tmp_path: Path
     assert reading.sessions() == []
     assert reading.history() == []
     assert reading.recent() == 0
+
+
+# Windows. The Win32 calls are replaced, so these run on every platform.
+
+
+@pytest.fixture
+def on_windows(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The driver on its Windows route, with each Win32 step recorded instead of made."""
+    calls: list[str] = []
+    monkeypatch.setattr(driver_module, "WINDOWS", True)
+    for name in ("activate", "clear", "press_return"):
+        monkeypatch.setattr(windows, name, lambda name=name: calls.append(name))
+    monkeypatch.setattr(windows, "open_link", lambda link: calls.append("open_link"))
+    monkeypatch.setattr(windows, "frontmost", lambda: "claude")
+    return calls
+
+
+def test_on_windows_the_clear_goes_through_win32_behind_the_guard(
+    driver: CoWork, on_windows: list[str]
+) -> None:
+    driver._clear()
+    assert on_windows == ["activate", "clear"]
+
+
+def test_on_windows_a_failed_step_is_code_3(
+    driver: CoWork, on_windows: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_window() -> None:
+        raise OSError("no claude.exe window: open CoWork first")
+
+    monkeypatch.setattr(windows, "activate", no_window)
+    with pytest.raises(CoWorkError) as raised:
+        driver._clear()
+    assert raised.value.code == 3
+
+
+def test_on_windows_another_process_in_front_is_code_9_and_nothing_is_cleared(
+    driver: CoWork, on_windows: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(windows, "frontmost", lambda: "code")
+    with pytest.raises(CoWorkError) as raised:
+        driver._clear()
+    assert raised.value.code == 9
+    assert on_windows == ["activate"]
+
+
+def test_on_windows_cancel_in_the_consent_box_is_code_2(
+    on_windows: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(driver_module, "_CONSENTED", False)
+    monkeypatch.setattr(windows, "consent", lambda message, title, timeout: False)
+    with pytest.raises(CoWorkError) as raised:
+        consent(CoWorkSection(consent=CONSENT_DIALOG))
+    assert raised.value.code == 2

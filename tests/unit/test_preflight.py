@@ -8,6 +8,7 @@ preflight table in docs/cli.md. See ../README.md.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -27,6 +28,15 @@ def configured(tmp_path: Path, text: str) -> Config:
 
 
 # The CoWork lines.
+
+
+def test_windows_is_a_cowork_platform_with_no_accessibility_grant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(preflight, "_accessibility_granted", lambda: pytest.fail("probed"))
+    lines = preflight.checks(preflight.COWORK, configured(tmp_path, "cowork:\n  surface: cowork\n"))
+    assert not [line for line in lines if "platform" in line or "Accessibility" in line]
 
 
 def test_no_configured_profile_is_one_line_carrying_its_message(tmp_path: Path) -> None:
