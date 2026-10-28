@@ -157,7 +157,7 @@ passes. An empty selection exits 2, and a malformed case exits 3.
 | Backend    | Requires                                                             | Fails when                                                  |
 | ---------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
 | `--docker` | a Docker or Rancher daemon, the image at its current digest, the container login, each name in `docker.env_passthrough` set and non-empty on the host | the daemon is down, the image is absent or stale, there is no login, a forwarded name is unset or empty, or a forwarded name would carry Claude's own credential |
-| `--cowork` | macOS, `claude` on `PATH`, `cowork.profile` in `cowork_evals.yaml`, a readable sessions root under it, the Accessibility grant, the suite within `cowork.max_runs` | the platform is not macOS, `claude` is absent, no profile is configured, the sessions root is unreadable, the grant is missing, or the suite would exceed the ceiling |
+| `--cowork` | macOS or Windows, `claude` on `PATH`, `cowork.profile` in `cowork_evals.yaml`, a readable sessions root under it, on macOS the Accessibility grant, the suite within `cowork.max_runs` | the platform is neither macOS nor Windows, `claude` is absent, no profile is configured, the sessions root is unreadable, the grant is missing, or the suite would exceed the ceiling |
 | `test`     | a daemon, the eval image, and the test image over it                 | the daemon is down, or an image is absent or stale          |
 
 A forwarded name that is unset or empty is one unmet line per name. A name that would carry

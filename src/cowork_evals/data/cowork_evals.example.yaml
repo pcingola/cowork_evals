@@ -13,7 +13,8 @@
 # The CoWork driver. docs/cowork_driver.md.
 cowork:
   # Required by the CoWork backend, and the one key with no default. A bare name resolves
-  # under ~/Library/Application Support. An absolute path is taken as it stands.
+  # under ~/Library/Application Support on macOS and %LOCALAPPDATA% on Windows. An absolute
+  # path is taken as it stands.
   profile: <the Application Support profile directory name>
   # surface: cowork
   # settle_seconds: 3.0

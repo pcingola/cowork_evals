@@ -19,7 +19,9 @@ imports it rather than the other way round.
 from __future__ import annotations
 
 import dataclasses
+import os
 import re
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -278,7 +280,8 @@ class CoWorkSection:
 
     @property
     def profile_dir(self) -> Path:
-        """The profile directory. A bare name resolves under Application Support.
+        """The profile directory. A bare name resolves under Application Support on macOS
+        and under `%LOCALAPPDATA%` on Windows.
 
         An absolute path is taken as it stands, which is how a test and a developer point
         the driver at a profile that is not in the default location.
@@ -293,6 +296,9 @@ class CoWorkSection:
         named = Path(self.profile).expanduser()
         if named.is_absolute():
             return named
+        if sys.platform == "win32":
+            local = os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local"
+            return Path(local) / self.profile
         return Path.home() / "Library" / "Application Support" / self.profile
 
     @property

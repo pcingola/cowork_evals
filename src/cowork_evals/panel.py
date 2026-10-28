@@ -18,10 +18,10 @@ return strings and [cli.py](cli.py) writes them. docs/panel.md, docs/case_histor
 
 from __future__ import annotations
 
-import fcntl
+import contextlib
 import hashlib
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import datetime, timedelta
 from math import inf
 from pathlib import Path
@@ -261,10 +261,35 @@ def append(root: Path | str, records: Sequence[HistoryRecord]) -> list[Path]:
         written.setdefault(file, []).append(line)
     for file, lines in sorted(written.items()):
         file.parent.mkdir(parents=True, exist_ok=True)
-        with file.open("a", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        with file.open("a", encoding="utf-8") as handle, _locked(handle):
             handle.write("".join(f"{line}\n" for line in lines))
     return sorted(written)
+
+
+@contextlib.contextmanager
+def _locked(handle: Any) -> Iterator[None]:
+    """An exclusive lock on an open file for the block. `fcntl` is POSIX only."""
+    try:
+        import fcntl
+    except ImportError:
+        import msvcrt
+
+        # Byte 0 of the file is the lock in every process; append mode still writes at the end.
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        handle.flush()
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def read(file: Path | str) -> tuple[list[HistoryRecord], list[str]]:

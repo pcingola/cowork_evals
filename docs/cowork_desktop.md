@@ -310,3 +310,20 @@ git-ignored:
   }
 }
 ```
+
+## Windows
+
+Measured by a probe run on Windows 11 (10.0.26200) with the Claude-3p application, 19 October
+2026. Everything above holds except these rows. The driver's Win32
+calls are in `src/cowork_evals/windows.py`.
+
+| Fact          | Value                                                                                  |
+| ------------- | -------------------------------------------------------------------------------------- |
+| Process       | `claude.exe`, window title `Claude`                                                    |
+| Profiles      | `%LOCALAPPDATA%\<profile>`. Sessions at the same `*/*/*` depth, same `audit.jsonl` keys |
+| Deep link     | `os.startfile` on the same link opens a new Cowork chat, prefilled, cursor in the composer |
+| Activation    | `SetForegroundWindow` on the `claude.exe` window, from a terminal                      |
+| Clear, submit | `SendInput`: Ctrl+A, Delete reached the composer. Return goes the same way, unprobed   |
+| Grant         | None. Windows has no counterpart of the Accessibility grant                            |
+| Consent       | `MessageBoxTimeoutW`, Cancel the default button, unprobed                              |
+
