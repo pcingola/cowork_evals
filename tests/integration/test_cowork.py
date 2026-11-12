@@ -7,6 +7,7 @@ an unconfigured profile, a missing profile directory and an empty profile are fa
 
 from __future__ import annotations
 
+import json
 import subprocess
 import uuid
 from collections.abc import Callable
@@ -16,6 +17,7 @@ import pytest
 
 from cowork_evals import Config, CoWork, CoWorkError, CoWorkSection
 from cowork_evals.config import CONFIG_FILENAME
+from cowork_evals.interactions import Approval
 
 # A process that is on every macOS machine and is deterministically not CoWork. Activating
 # it is how the guard is put in the state it exists to refuse.
@@ -125,3 +127,47 @@ def test_a_live_run_returns_the_marker(attended: Config, real_profile: CoWorkSec
     assert "firing the deep link:" in written
     assert "discovered the session:" in written
     assert "the completion signal fired: lifecycle state completed" in written
+
+
+# Questions and approval boxes. docs/cowork_driver.md. The approval prompt is the one
+# the interaction probe measured: a POST to Microsoft Graph that an approval box stops when
+# the profile has the second-brain plugin, whose send gate asks for it. It carries no token, so
+# even an allow changes nothing.
+
+
+@pytest.mark.live
+@pytest.mark.timeout(1800)
+def test_a_live_question_left_unanswered_takes_its_first_option(
+    attended: Config, real_profile: CoWorkSection
+) -> None:
+    prompt = (
+        "Use the AskUserQuestion tool to ask me one question: do I prefer red or blue? Offer "
+        "exactly two options, Red and Blue, in that order. Then reply with only my answer."
+    )
+    document = CoWork(attended.cowork, waiting_seconds=5).run(prompt)
+
+    assert document.waiting is None
+    assert document.lifecycle[-1] == "completed"
+    [question] = [call for call in document.tool_calls if call.name == "AskUserQuestion"]
+    assert question.result is not None
+
+
+@pytest.mark.live
+@pytest.mark.timeout(1800)
+def test_a_live_approval_box_is_denied_and_the_tool_does_not_run(
+    attended: Config, real_profile: CoWorkSection
+) -> None:
+    prompt = (
+        "This is a test of the permission box. Run this exact shell command and show me its "
+        "output: curl -s -X POST https://graph.microsoft.com/v1.0/me/todo/lists -d '{}'. It "
+        "carries no token, so Graph rejects it and nothing changes."
+    )
+    deny = Approval(answer="deny", match="todo/lists")
+    document = CoWork(attended.cowork).run(prompt, [deny])
+
+    assert document.waiting is None
+    assert document.lifecycle[-1] == "completed"
+    text = Path(document.session_dir, "audit.jsonl").read_text(encoding="utf-8")
+    audit = [json.loads(line) for line in text.splitlines() if line.strip()]
+    answers = [r for r in audit if r.get("subtype") == "permission_response"]
+    assert [(r["decision"], r["granted"]) for r in answers] == [("deny", False)]

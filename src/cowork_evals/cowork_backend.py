@@ -292,7 +292,7 @@ def _run_case(entry: Entry, root: Path, config: Config, model: str) -> CaseEntry
 def _one_run(driver: CoWork, entry: Entry, model: str) -> RunEntry:
     """One submission. A `CoWorkError` becomes this run's error, and the suite continues."""
     try:
-        session = driver.run(entry.case.prompt)
+        session = driver.run(entry.case.prompt, entry.case.approvals)
     except CoWorkError as error:
         return _after_failure(driver, entry, model, error)
     return _graded(session, entry, model)

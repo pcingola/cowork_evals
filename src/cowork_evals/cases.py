@@ -20,6 +20,9 @@ import frontmatter
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from . import interactions
+from .interactions import INTERACTIONS_FILE, Approval
+
 # What makes a directory a case, a case's optional second file, and its grader directory.
 # docs/eval_format.md.
 PROMPT_FILE = "prompt.md"
@@ -291,6 +294,12 @@ class Case:
     def no_cowork(self) -> bool:
         """Whether the case carries the reserved tag. It is read here and nowhere else."""
         return NO_COWORK in self.tags
+
+    @property
+    def approvals(self) -> list[Approval]:
+        """The answers in `interactions.yaml`, empty with no file. Only CoWork reads it."""
+        path = self.directory / INTERACTIONS_FILE
+        return interactions.read(path) if path.is_file() else []
 
     @property
     def frontmatter(self) -> PromptFrontmatter:
