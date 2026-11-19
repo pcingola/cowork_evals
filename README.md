@@ -86,7 +86,7 @@ to install the new skills. Your configuration and your `CLAUDE.md` are kept.
 | Backend                    | You need                                                       |
 | -------------------------- | ---------------------------------------------------------------- |
 | The container, `--docker`  | Docker or Rancher Desktop running, the images from `setup --docker`, and the one-time login from `login --docker` |
-| CoWork, `--cowork`         | macOS, `claude` on `PATH`, CoWork signed in, the profile named in `cowork_evals.yaml`, and the macOS Accessibility grant |
+| CoWork, `--cowork`         | macOS or Windows, `claude` on `PATH`, CoWork signed in, the profile named in `cowork_evals.yaml`, and on macOS the Accessibility grant |
 
 `cowork_evals check --all` reports what each backend is still missing, and names the command
 that supplies it.

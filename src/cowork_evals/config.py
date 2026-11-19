@@ -19,7 +19,9 @@ imports it rather than the other way round.
 from __future__ import annotations
 
 import dataclasses
+import os
 import re
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -252,6 +254,7 @@ class CoWorkSection:
     settle_seconds: float = 3.0
     session_timeout: float = 120.0
     idle_seconds: float = 20.0
+    waiting_seconds: float = 60.0
     run_timeout: float = 1800.0
     max_runs: int = 50
     consent: str = CONSENT_DIALOG
@@ -265,6 +268,7 @@ class CoWorkSection:
         "settle_seconds": _seconds,
         "session_timeout": _seconds,
         "idle_seconds": _seconds,
+        "waiting_seconds": _seconds,
         "run_timeout": _seconds,
         "max_runs": _count,
         "consent": _consent,
@@ -278,7 +282,8 @@ class CoWorkSection:
 
     @property
     def profile_dir(self) -> Path:
-        """The profile directory. A bare name resolves under Application Support.
+        """The profile directory. A bare name resolves under Application Support on macOS
+        and under `%LOCALAPPDATA%` on Windows.
 
         An absolute path is taken as it stands, which is how a test and a developer point
         the driver at a profile that is not in the default location.
@@ -293,6 +298,9 @@ class CoWorkSection:
         named = Path(self.profile).expanduser()
         if named.is_absolute():
             return named
+        if sys.platform == "win32":
+            local = os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local"
+            return Path(local) / self.profile
         return Path.home() / "Library" / "Application Support" / self.profile
 
     @property

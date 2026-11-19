@@ -28,6 +28,7 @@ One eval directory per skill, inside the plugin, in the repository that owns the
 <plugin>/evals/<skill>/<case>/graders/<name>.md
 <plugin>/evals/<skill>/<case>/checks/<name>.py    # optional, assertions as Python
 <plugin>/evals/<skill>/<case>/case.yaml           # optional, context.* only
+<plugin>/evals/<skill>/<case>/interactions.yaml   # optional, CoWork's answers to approval boxes
 <plugin>/evals/plugin/<case>/                     # a case that crosses skills
 <plugin>/evals/mocks/<server>/<tool>.md           # MCP tool mocks shared by every case
 ```
@@ -281,6 +282,25 @@ of it that binds a case file.
 A check file is host code. It is the one thing under the eval path that is not code under
 test, so the session's wheel set does not bind it. Its imports are the consumer's own
 dependencies. See [checks.md](checks.md#where-a-check-runs-and-what-it-may-import).
+
+## interactions.yaml
+
+Optional, read by the CoWork backend only. Each approval box the session shows takes the first
+answer not yet used whose `match`, a regular expression over the tool name and its input as
+JSON, finds the box's tool. An allow is used once; a deny is not spent, so a retried call that
+raises the same box again is denied again. A box with no answer for it stops the run as waiting,
+graded on what it did. Questions take no answer here: the driver presses their first option.
+[cowork_driver.md](cowork_driver.md#questions-and-approval-boxes).
+
+```yaml
+schema_version: "1.0"
+approvals:
+  - match: "sendMail"   # optional
+    answer: deny        # allow (once) or deny
+```
+
+A denied call's result in the trace starts `User rejected using`, which a `regex` grader with
+`target: trace` can assert.
 
 ## What the validator enforces
 

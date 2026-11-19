@@ -30,8 +30,9 @@ COWORK = "cowork"
 TEST = "test"
 BACKENDS = (DOCKER, COWORK)
 
-# The one platform the CoWork desktop application runs on. docs/cowork_desktop.md.
+# The platforms the CoWork driver drives the desktop application on. docs/cowork_desktop.md.
 DARWIN = "darwin"
+WINDOWS = "win32"
 
 # The CLI the judge and `claudeVersion` both need on the CoWork backend. docs/cli.md.
 CLAUDE = "claude"
@@ -71,21 +72,23 @@ def report_all(config: Config) -> list[tuple[str, list[str]]]:
 
 
 def _cowork(config: Config) -> list[str]:
-    """macOS, `claude`, a configured profile, a readable sessions root, and the grant.
+    """macOS or Windows, `claude`, a configured profile, a readable sessions root, and on
+    macOS the Accessibility grant, which Windows has no equivalent of.
 
     The desktop application itself is not probed. What the backend reads is the profile
     directory the application writes sessions into, and an unreadable one is the condition
     that matters. docs/cowork_desktop.md.
     """
     unmet: list[str] = []
-    if sys.platform != DARWIN:
+    if sys.platform not in (DARWIN, WINDOWS):
         unmet.append(
-            f"the platform is {sys.platform}: the CoWork backend drives a macOS application"
+            f"the platform is {sys.platform}: the CoWork backend drives the desktop application "
+            "on macOS or Windows"
         )
     if shutil.which(CLAUDE) is None:
         unmet.append(f"{CLAUDE} is not on PATH: install the Claude Code CLI")
     unmet += _profile(config)
-    if not _accessibility_granted():
+    if sys.platform == DARWIN and not _accessibility_granted():
         unmet.append(
             "no macOS Accessibility grant: grant it to the terminal application in "
             "System Settings, Privacy and Security, Accessibility"
