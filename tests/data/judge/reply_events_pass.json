@@ -1,0 +1,39 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "model": "haiku",
+    "tools": [
+      "StructuredOutput"
+    ]
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "name": "StructuredOutput",
+          "input": {
+            "verdict": "PASS",
+            "reasoning": "the material is PONG"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "duration_ms": 1400,
+    "num_turns": 2,
+    "result": "",
+    "structured_output": {
+      "verdict": "PASS",
+      "reasoning": "the material is PONG"
+    },
+    "total_cost_usd": 0.006
+  }
+]

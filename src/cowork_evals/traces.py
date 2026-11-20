@@ -249,9 +249,18 @@ def unoffered_tools(records: list[TraceRecord], granted: tuple[str, ...]) -> lis
     missing: list[str] = []
     for name in granted:
         bare = _bare(name)
-        if bare and bare not in offered and bare not in missing:
+        if bare and not _covered(bare, offered) and bare not in missing:
             missing.append(bare)
     return missing
+
+
+def _covered(grant: str, offered: set[str]) -> bool:
+    """Whether the run offered the granted tool. A grant ending in `*`, as a plugin's MCP
+    tools are granted (`mcp__plugin_<plugin>_<server>__*`), covers every tool its prefix
+    names, and it is offered when the run offered any of them."""
+    if grant.endswith("*"):
+        return any(tool.startswith(grant[:-1]) for tool in offered)
+    return grant in offered
 
 
 def _note_validity(run: RunEntry, records: list[TraceRecord], granted: tuple[str, ...]) -> None:

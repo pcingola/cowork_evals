@@ -134,10 +134,12 @@ RUN --mount=type=secret,id=extra_ca \
   fi
 
 # LibreOffice from the upstream deb set. Jammy ships 7.3, and the 26.2 pyuno is what
-# unoserver==3.7 needs. The upstream release is named 26.2.5 and soffice reports 26.2.5.2.
-# TARGETARCH is Docker's name for the architecture; the archive uses two others, one for
-# the directory and one for the file name.
-ARG LIBREOFFICE_RELEASE=26.2.5
+# unoserver==3.7 needs. It comes from the Document Foundation's archive, which keeps every
+# release: the stable tree keeps only the current ones and dropped 26.2.5, so a build there
+# fails with curl exit 22. The archive names the release by its full number, which is also
+# what soffice reports. TARGETARCH is Docker's name for the architecture; the archive uses
+# two others, one for the directory and one for the file name.
+ARG LIBREOFFICE_RELEASE=26.2.5.2
 RUN set -eux; \
   case "${TARGETARCH:-arm64}" in \
     arm64) lo_dir=aarch64; lo_file=aarch64 ;; \
@@ -146,7 +148,7 @@ RUN set -eux; \
   esac; \
   tarball="LibreOffice_${LIBREOFFICE_RELEASE}_Linux_${lo_file}_deb.tar.gz"; \
   cd /tmp; \
-  curl -fsSLO "https://download.documentfoundation.org/libreoffice/stable/${LIBREOFFICE_RELEASE}/deb/${lo_dir}/${tarball}"; \
+  curl -fsSLO "https://downloadarchive.documentfoundation.org/libreoffice/old/${LIBREOFFICE_RELEASE}/deb/${lo_dir}/${tarball}"; \
   tar -xzf "${tarball}"; \
   dpkg -i LibreOffice_"${LIBREOFFICE_RELEASE}"*_Linux_*_deb/DEBS/*.deb; \
   rm -rf /tmp/"${tarball}" /tmp/LibreOffice_"${LIBREOFFICE_RELEASE}"*_Linux_*_deb; \

@@ -526,7 +526,7 @@ class Docker:
             "-v",
             f"{Path(output_dir).resolve() / KEEP_FILE}:{CONTAINER_KEEP_FILE}:ro",
             self.tag,
-            *eval_argv(container_target, CONTAINER_LOGS, options),
+            *eval_argv(container_target, CONTAINER_LOGS, options, self.claude_code_version),
         ]
 
     def credential_argv(self) -> list[str]:

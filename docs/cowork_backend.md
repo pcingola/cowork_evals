@@ -168,7 +168,9 @@ out of a text vote. The material is truncated head and tail as the harness trunc
 
 The schema is an object with exactly two required string keys: `reasoning`, and `verdict`,
 which is `PASS` or `FAIL`. The CLI enforces it and prints the answer as `structured_output`
-beside `result`. A reply is read from `structured_output` when it carries one, and from
+beside `result`. Claude Code 2.1.329 prints the session as an array of events, and the reply is
+its last event whose `type` is `result`; an older CLI prints that event alone. An array with no
+`result` event is a lost vote. A reply is read from `structured_output` when it carries one, and from
 `result` as a bare word otherwise. A `verdict` outside the schema is a lost vote. The
 grader's `explanation` is `judge votes: ` and the votes in order, then the first 400
 characters of the first non-empty `reasoning` on the winning side. A bare-word reply carries

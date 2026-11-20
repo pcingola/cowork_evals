@@ -490,8 +490,26 @@ def test_a_mode_denial_names_its_tool_and_a_hook_denial_names_none(
         ([record for record in TRACE if record.type != "system"], GRANT, None),
         ([init(), *TRACE[1:]], (), None),
         ([init(), *TRACE[1:]], GRANT, None),
+        (
+            [init(["Read", "mcp__plugin_p_s__search", "mcp__plugin_p_s__fetch"]), *TRACE[1:]],
+            ("Read", "mcp__plugin_p_s__*"),
+            None,
+        ),
+        (
+            [init(["Read", "mcp__plugin_p_other__search"]), *TRACE[1:]],
+            ("Read", "mcp__plugin_p_s__*"),
+            ["mcp__plugin_p_s__*"],
+        ),
     ],
-    ids=["missing", "before-the-bracket", "no-init", "empty-grant", "healthy"],
+    ids=[
+        "missing",
+        "before-the-bracket",
+        "no-init",
+        "empty-grant",
+        "healthy",
+        "wildcard",
+        "wildcard-missing",
+    ],
 )
 def test_a_granted_tool_missing_from_the_offered_list_is_named(
     tmp_path: Path,

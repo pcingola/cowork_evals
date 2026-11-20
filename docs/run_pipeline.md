@@ -30,9 +30,18 @@ What each flag does, and the harness behaviour behind it, is [plugin_eval.md](pl
 | `--allow-tools`                              | the configured grant              | `eval.allow_tools`, the session mirror       |
 | `--keep-temp`                                | on, when the run keeps its traces | `eval.keep_traces`, true                     |
 | `--no-publish`, `--no-scaffold`, `--verbose` | always                            | none                                         |
+| `--trust-plugin`, `--allow-real-servers`     | from Claude Code 2.1.269          | `docker.claude_code_version`, 2.1.265        |
 
 The target goes before every variadic flag: `--tag` and `--allow-tools` swallow a trailing
 target.
+
+`--trust-plugin` and `--allow-real-servers` first appear in Claude Code 2.1.269, and a run on
+that release or a later one needs both. Without `--trust-plugin` the first run in a plugin
+directory waits on a confirmation nobody answers. Without `--allow-real-servers` the default
+`--mocks record` starts no real MCP server that has no mock, so a plugin's own servers never
+come up and its tools are never offered; `--mocks off` would start them too, and it would also
+turn off every mock a suite ships, which is why it is not the flag. A release before 2.1.269
+rejects both flags, so neither is emitted there.
 
 `--threshold 0` hands pass and fail to this package, and it has no command-line option.
 `eval.delta_threshold` is read by the verdict and reaches no command line.

@@ -33,6 +33,22 @@ ENABLEMENT_ENV = "CLAUDE_CODE_WALNUT_SPIRE=1"
 # lives: `eval.delta_threshold`, read there and never emitted here. docs/run_pipeline.md.
 THRESHOLD = "0"
 
+# The first Claude Code release whose `plugin eval` takes `--trust-plugin` and
+# `--allow-real-servers`, and from which a run needs both: without the first, a plugin
+# directory the CLI has not seen asks for confirmation and an unattended run cannot answer;
+# without the second, the default `--mocks record` starts no real MCP server that has no
+# mock, so a plugin's own servers never come up. Measured on `plugin eval --help`: absent
+# from 2.1.268, present from 2.1.269. docs/run_pipeline.md.
+TRUST_FLAGS_SINCE = (2, 1, 269)
+
+
+def claude_code_release(version: str) -> tuple[int, ...]:
+    """`docker.claude_code_version` as numbers, so two releases compare as releases."""
+    parts = version.split(".")
+    if not all(part.isdigit() for part in parts):
+        raise ValueError(f"docker.claude_code_version is not a release number: {version!r}")
+    return tuple(int(part) for part in parts)
+
 
 @dataclass(frozen=True)
 class RunOptions:
@@ -88,12 +104,15 @@ class RunOptions:
         )
 
 
-def eval_argv(target: Path | str, output_dir: Path | str, options: RunOptions) -> list[str]:
+def eval_argv(
+    target: Path | str, output_dir: Path | str, options: RunOptions, claude_code_version: str
+) -> list[str]:
     """The whole command line. Nothing that is neither pinned nor optioned is emitted.
 
     `--debug-file` goes before `plugin`, and never a bare `--debug`, which swallows the
     subcommand name as its filter. `--json` is never emitted, for the reason in
-    docs/docker.md.
+    docs/docker.md. `claude_code_version` is the CLI the command runs on, which decides
+    the flags only newer releases take.
     """
     output_dir = Path(output_dir)
     argv = [
@@ -120,6 +139,8 @@ def eval_argv(target: Path | str, output_dir: Path | str, options: RunOptions) -
         "--no-scaffold",
         "--verbose",
     ]
+    if claude_code_release(claude_code_version) >= TRUST_FLAGS_SINCE:
+        argv += ["--trust-plugin", "--allow-real-servers"]
     if options.keep_traces:
         # Every run's sandbox is kept, not only an errored run's. Where it is kept is the
         # backend's `TMPDIR`, and what is kept out of it is traces.py.

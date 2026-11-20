@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from .cases import BaselineGraderConfig, FileTarget, Grader, LlmGraderConfig
 from .config import Config
@@ -109,17 +109,26 @@ class JudgeVerdict(BaseModel):
 
 
 class JudgeOutput(BaseModel):
-    """One `claude -p --output-format json` document, as far as the judge reads it.
+    """One `claude -p --output-format json` event, as far as the judge reads it.
 
-    A reply also carries `type`, `subtype`, `is_error` and sometimes `duration_ms` and
-    `num_turns`, which nothing here reads.
+    The reply is the event whose `type` is `result`. It also carries `subtype`, `is_error` and
+    sometimes `duration_ms` and `num_turns`, which nothing here reads.
     """
 
     model_config = ConfigDict(extra="ignore")
 
+    type: str | None = None
     result: str | None = None
     structured_output: JudgeVerdict | None = None
     total_cost_usd: float = 0.0
+
+
+# What `--output-format json` prints: one `result` event, or the session's events as an array.
+JudgeStdout = JudgeOutput | list[JudgeOutput]
+JUDGE_STDOUT: TypeAdapter[JudgeStdout] = TypeAdapter(JudgeStdout)
+
+# The `type` of the event that carries the reply.
+RESULT_TYPE = "result"
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,16 +345,25 @@ def _as_text(content: bytes) -> str | None:
 
 
 def read_reply(stdout: str) -> Reply:
-    """One vote, its reasoning and its spend, from one `--output-format json` document.
+    """One vote, its reasoning and its spend, from what `--output-format json` printed.
 
-    A document carrying `structured_output` is read from it, and any other from `result` as a bare
-    word. A reply that is neither word is a lost vote, and a lost vote is not a `PASS`. A document
-    that does not parse, or does not validate as `JudgeOutput`, is a lost vote that cost nothing.
+    Claude Code 2.1.329 prints the session as an array of events, and the reply is its last
+    `result` event; an older CLI prints that event alone. A reply carrying `structured_output` is
+    read from it, and any other from `result` as a bare word. A reply that is neither word is a
+    lost vote, and a lost vote is not a `PASS`. Output that does not parse, or does not validate as
+    `JudgeOutput` or an array of them, is a lost vote that cost nothing.
     """
     try:
-        payload = JudgeOutput.model_validate_json(stdout)
+        printed = JUDGE_STDOUT.validate_json(stdout)
     except ValidationError:
         return Reply(error="the judge printed no JSON document")
+    if isinstance(printed, list):
+        results = [event for event in printed if event.type == RESULT_TYPE]
+        if not results:
+            return Reply(error="the judge printed no result event")
+        payload = results[-1]
+    else:
+        payload = printed
     spent = payload.total_cost_usd
 
     structured = payload.structured_output

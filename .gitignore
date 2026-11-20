@@ -29,6 +29,9 @@ tmp/
 # src/cowork_evals/data/skills/ is the one source. See docs/library.md.
 .claude/skills/
 
+# IDE
+.idea
+
 # Configuration. Names a CoWork profile, which is an identifier.
 # See README.md, the public repository rule.
 cowork_evals.yaml

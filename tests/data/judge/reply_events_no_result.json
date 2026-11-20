@@ -1,0 +1,22 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "model": "haiku",
+    "tools": [
+      "StructuredOutput"
+    ]
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "PONG"
+        }
+      ]
+    }
+  }
+]

@@ -16,6 +16,8 @@ from cowork_evals.harness import RunOptions, eval_argv
 
 TARGET = "/work/plugin/evals"
 LOGS = "/work/logs"
+# The default release, which takes neither of the newer flags.
+VERSION = "2.1.265"
 
 
 def value_after(argv: list[str], flag: str) -> str:
@@ -64,14 +66,14 @@ def test_each_option_resolves_argument_over_file_over_default(
 
 
 def test_the_target_comes_before_every_variadic_flag(run_options: RunOptions) -> None:
-    argv = eval_argv(TARGET, LOGS, replace(run_options, tags=("skill",)))
+    argv = eval_argv(TARGET, LOGS, replace(run_options, tags=("skill",)), VERSION)
     target = argv.index(TARGET)
     assert target < argv.index("--allow-tools")
     assert target < argv.index("--tag")
 
 
 def test_the_debug_file_goes_before_the_subcommand(run_options: RunOptions) -> None:
-    argv = eval_argv(TARGET, LOGS, run_options)
+    argv = eval_argv(TARGET, LOGS, run_options, VERSION)
     assert argv[:5] == ["claude", "--debug-file", "/work/logs/debug.txt", "plugin", "eval"]
     assert "--debug" not in argv, "a bare --debug swallows the subcommand name as its filter"
 
@@ -84,7 +86,7 @@ def test_every_always_pinned_flag_is_emitted() -> None:
         max_cost_usd="2.5",
         allow_tools=("Bash", "Write"),
     )
-    argv = eval_argv(TARGET, LOGS, options)
+    argv = eval_argv(TARGET, LOGS, options, VERSION)
     assert value_after(argv, "--model") == "opus"
     assert value_after(argv, "--judge-model") == "sonnet"
     assert value_after(argv, "--ablation") == "with-without"
@@ -97,7 +99,7 @@ def test_every_always_pinned_flag_is_emitted() -> None:
 
 
 def test_nothing_unasked_is_emitted(run_options: RunOptions) -> None:
-    argv = eval_argv(TARGET, LOGS, run_options)
+    argv = eval_argv(TARGET, LOGS, run_options, VERSION)
     for flag in ("--runs", "--case", "--tag", "--report", "--mocks", "--eval-dir", "--json"):
         assert flag not in argv
 
@@ -107,14 +109,34 @@ def test_keep_temp_is_emitted_when_the_run_keeps_its_traces(
     run_options: RunOptions, keep_traces: bool
 ) -> None:
     """Without it only an errored run's sandbox is kept, and no passing run leaves a trace."""
-    argv = eval_argv(TARGET, LOGS, replace(run_options, keep_traces=keep_traces))
+    argv = eval_argv(TARGET, LOGS, replace(run_options, keep_traces=keep_traces), VERSION)
     assert ("--keep-temp" in argv) is keep_traces
 
 
 def test_the_optional_flags_are_emitted_when_asked(run_options: RunOptions) -> None:
-    argv = eval_argv(
-        TARGET, LOGS, replace(run_options, runs=1, case="smoke-*", tags=("plugin", "skill"))
-    )
+    options = replace(run_options, runs=1, case="smoke-*", tags=("plugin", "skill"))
+    argv = eval_argv(TARGET, LOGS, options, VERSION)
     assert value_after(argv, "--runs") == "1"
     assert value_after(argv, "--case") == "smoke-*"
     assert argv[argv.index("--tag") + 1 :] == ["plugin", "skill"]
+
+
+@pytest.mark.parametrize(
+    ("version", "emitted"),
+    [("2.1.265", False), ("2.1.268", False), ("2.1.269", True), ("2.1.328", True), ("2.2.0", True)],
+)
+def test_the_trust_and_real_server_flags_follow_the_release(
+    run_options: RunOptions, version: str, emitted: bool
+) -> None:
+    """2.1.269 is the first release whose `plugin eval` takes them, and an earlier one rejects
+    them. `--mocks off` is never the substitute: it would turn off a suite's mocks."""
+    argv = eval_argv(TARGET, LOGS, run_options, version)
+    assert ("--trust-plugin" in argv) is emitted
+    assert ("--allow-real-servers" in argv) is emitted
+    assert "--mocks" not in argv
+    assert argv.index(TARGET) < argv.index("--allow-tools")
+
+
+def test_a_release_that_is_not_a_number_is_refused(run_options: RunOptions) -> None:
+    with pytest.raises(ValueError, match="not a release number"):
+        eval_argv(TARGET, LOGS, run_options, "latest")

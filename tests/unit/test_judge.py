@@ -198,6 +198,11 @@ def test_a_baseline_file_outside_the_case_or_absent_is_a_failed_grader(
         ),
         ("`plugin eval` is in early access\n", Reply(error="the judge printed no JSON document")),
         (
+            recorded("reply_events_pass"),
+            Reply(vote=True, cost_usd=0.006, reasoning="the material is PONG"),
+        ),
+        (recorded("reply_events_no_result"), Reply(error="the judge printed no result event")),
+        (
             recorded("reply_reasoned_unsure"),
             Reply(
                 cost_usd=0.0021,
